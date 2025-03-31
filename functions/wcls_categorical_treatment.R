@@ -1,4 +1,4 @@
-library(rootSolve)
+# run ".../misc/toy_example" for an example how to to use wcls estimator.
 
 
 #------------------ wcls categorical treatment ---------------------------------
