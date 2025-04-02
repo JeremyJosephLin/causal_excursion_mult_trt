@@ -1,6 +1,7 @@
 rm(list = ls(all = TRUE))
 source("wcls_categorical_treatment.R")
 
+library(rootSolve)
 
 # --------------------- Make synthetic data -------------------------------------- 
 
