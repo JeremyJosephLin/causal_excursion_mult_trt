@@ -121,6 +121,26 @@ construct_var_theta_trt <- function(m, pt, theta){
   return(h_t)
 }
 
+compute_ASPNC <- function(gt, alpha, taut) {
+  num <- sum(gt %*% alpha * taut)
+  denom <- sum(taut)
+  return(num / denom)
+}
+
+# assume availability always 1 
+compute_ASPNC_SConY <- function(SPNC) {
+  return(mean(SPNC))
+}
+
+compute_SPNC_SConY <- function(gt, alpha, taut, coef_SC) {
+  m <- nrow(gt)
+  SPNC <- rep(NA, m)
+  SPNC[1] <- as.numeric(gt[1,] %*% alpha)
+  for (t in 2:m) {
+    SPNC[t] <- as.numeric(gt[t,] %*% alpha) + coef_SC * SPNC[t-1]
+  }
+  return(SPNC)
+}
 
 ##### solve beta #####
 solve_beta <- function(shape, m, ATE, ft, taut, ...) {
@@ -243,6 +263,12 @@ solve_beta_star_linear_theta <- function(m, ATE, ft, taut, theta, beta1) {
     beta0_star <- (ratio * m - 1) / (1 - ratio) * beta1_star
     return(c(beta0_star, beta1_star))
   }
+}
+
+##### solve eta #####
+solve_eta <- function(mean_var = 1, coef_SC = 0){
+  # eta is a coeffiecient to make sure mean_variance is fixed, when Y is endogeneous
+  eta = sqrt(mean_var^2 - coef_SC^2)
 }
 
 ##### solve alpha #####

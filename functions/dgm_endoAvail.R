@@ -2,7 +2,7 @@
 ### dgm with endogenous availability process ###
 
 
-source("~/Research/causal_excursion_mult_trt/R code/functions_util.R")
+source("functions/utillity.R")
 
 trun <- function(x){
   if(x < 1 & x> -1){
