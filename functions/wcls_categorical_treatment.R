@@ -1,4 +1,11 @@
 # run ".../misc/toy_example" for an example how to to use wcls estimator.
+# 04/04 :debuged and updated generalized for input in tibble and fix decission time variable
+# 04/07 : Added dependedies for multi root packages 
+
+if(!require(rootSolve)){
+  install.packages("rootSolve")
+  library(rootSolve)
+}
 
 
 #------------------ wcls categorical treatment ---------------------------------
@@ -68,10 +75,12 @@ wcls_categorical_treatment <- function(
 )
 {
   ### 1. preparation ###
-  dta$time = dta[,decision_time_varname]
+  # convert to dataframe 
+  dta <- as.data.frame(dta)
+  
   sample_size <- length(unique(dta[, id_varname]))
-  total_person_decisionpoint <- nrow(dta)
-  total_T <- total_person_decisionpoint / sample_size
+  total_person_decisionpoint <-  nrow(dta)
+  total_T <- max(dta[, decision_time_varname])
   A <- dta[, treatment_varname]
   
   p_t <- dta[, rand_prob_varname]
@@ -92,13 +101,12 @@ wcls_categorical_treatment <- function(
   
   for (i in 1:total_T) {
     # extract p_t for at time point i
-    temp <- dta[which(dta$time == i), treatment_varname]
-    p_t_tilde[which(dta$time == i)] = match_p_tilde(temp, pmatrix_tilde[i,])
+    temp <- dta[which(dta[,decision_time_varname] == i), treatment_varname]
+    p_t_tilde[which(dta[,decision_time_varname] == i)] = match_p_tilde(temp, pmatrix_tilde[i,])
     ind <- build_W_mat(temp,pmatrix_tilde[i,] )
-    ind_matrix[which(dta$time == i),] = ind$ind_matrix
-    ind_center[which(dta$time == i),] = ind$ind_center
+    ind_matrix[which(dta[,decision_time_varname] == i),] = ind$ind_matrix
+    ind_center[which(dta[,decision_time_varname] == i),] = ind$ind_center
   }
-  
   
   Y <- dta[, outcome_varname]
   
