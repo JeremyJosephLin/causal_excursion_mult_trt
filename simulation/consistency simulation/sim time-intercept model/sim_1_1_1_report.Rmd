@@ -1,0 +1,509 @@
+---
+title: "Simulation 1_1"
+author: "Jeremy J Lin"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document :
+    keep_tex: true
+    extra_dependencies: "subfig"
+header-includes:
+ - \usepackage{booktabs}
+ - \usepackage{longtable}
+ - \usepackage{array}
+ - \usepackage{multirow}
+ - \usepackage{wrapfig}
+ - \usepackage{float}
+ - \usepackage{subfig}
+ - \floatplacement{figure}{H}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(nlme)
+library(Matrix)
+library(MASS)
+library(rootSolve)
+library(geepack)
+library(lme4)
+library(mvtnorm)
+library(reshape2)
+library(knitr)
+library(ggplot2)
+library(tidyr)
+library(gridExtra)
+library(tidyverse)
+library(dplyr)
+library(kableExtra)
+library(corrplot)
+library(robustHD)
+library(pracma)
+library(xtable)
+library(latex2exp)
+library(janitor)
+library(ggpubr)
+# parallel computing libraries
+library(foreach)
+#library(doMC)
+# beep beep 
+library(beepr)
+library(doParallel)
+library(doSNOW)
+library(utils)
+library(foreach)
+library(doRNG)
+library(geepack)
+```
+
+```{r echo=FALSE}
+#rm(list = ls())
+
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, 
+                      warning = FALSE, results = "hide", 
+                      fig.pos = 'H', cache = FALSE, 
+                      eval = TRUE)
+```
+
+<!-- Functions -->
+
+
+# Simulation Settings 
+
+Consistency simulation for Estimator performed over 1000 rep simulation. 
+
+
+Data generative model : 
+
+\begin{align*}
+  Y_{it, 1} | H_t, A_t &= I_{(A_{it} = 1)}(\beta_1  + \beta_2 Z_{it} + \beta_3 t)+ I_{(A_{i,t} = 2)}(\beta_4 + \beta_5 Z_{it} + \beta_6 t) + (0.2 I_{Z_{it} = 0} + 0.5 I_{Z_{it} = 1} + 0.4 I_{Z_{it} = 2})+ \alpha t +  \epsilon_{i,t}\\
+  \beta_1 &= 0.1 \text{ (Intercept of treatment 1)}\\
+  \beta_2 &= 0.3 \text{ (slope of treatment 1)}\\
+  \beta_3 &= 0.2 \text{ (Intercept of treatment 2)}\\
+  \beta_4 &= 0.1 \text{ (slope of treatment 2)}
+\end{align*}
+
+\begin{align*}
+  I_t &\sim Bern (1)\\
+  A_{i,t} &= \{0, 1, 2\}\\
+  P(A_{it} = 0 |H_t) &=\tilde{p_0}  = 0.2\\
+  P(A_{it} = 1 |H_t) &=\tilde{p_1}  = 0.5\\
+  P(A_{it} = 2 |H_t) &=\tilde{p_2}  = 0.3\\
+\end{align*}
+
+Working model : 
+\begin{align*}
+  Y_{it, 1} | H_t, A_t &= I_{(A_{it} = 1)}(\beta_1  + \beta_2 Z_{it} + \beta_3 t)+ I_{(A_{i,t} = 2)}(\beta_4 + \beta_5 Z_{it} + \beta_6 t) + (0.2 I_{Z_{it} = 0} + 0.5 I_{Z_{it} = 1} + 0.4 I_{Z_{it} = 2})+ \alpha t +  \epsilon_{i,t}\\
+  \beta_1 &= 0.1 \text{ (Intercept of treatment 1)}\\
+  \beta_2 &= 0.3 \text{ (slope of treatment 1)}\\
+  \beta_3 &= 0.2 \text{ (Intercept of treatment 2)}\\
+  \beta_4 &= 0.1 \text{ (slope of treatment 2)}
+\end{align*}
+
+
+# Parameter
+```{r eval = TRUE}
+alpha <- c(1, 1) # no treatment
+mean_var <- 1
+L <- matrix(cbind(diag(1, nrow = 2), - diag(1, nrow = 2)), nrow = 2) #Contrast Matrix
+gamma <- 0.05 #type 1 error
+b = 0.2 #type 2 error
+prob_a <- c(0.2, 0.5, 0.3)
+
+```
+
+```{r eval=TRUE}
+result_list <-
+  readRDS("sim.rds")
+```
+
+
+```{r}
+na_vec <- rep(NA, length(result_list))
+param <- c(0.1, 0.3, 0.01, 0.45, 0.1, 0.02)
+
+coef_est <- data.frame(
+  sample_size = na_vec,
+  total_T = na_vec,
+  bias_beta_1 = na_vec,
+  bias_beta_2 = na_vec,
+  bias_beta_3 = na_vec,
+  bias_beta_4 = na_vec,
+  bias_beta_5 = na_vec,
+  bias_beta_6 = na_vec,
+  th_se_beta_1 = na_vec,
+  th_se_beta_2 = na_vec,
+  th_se_beta_3 = na_vec,
+  th_se_beta_4 = na_vec,
+  th_se_beta_5 = na_vec,
+  th_se_beta_6 = na_vec,
+  beta_1_se = na_vec,
+  beta_2_se = na_vec,
+  beta_3_se = na_vec,
+  beta_4_se = na_vec,
+  beta_5_se = na_vec,
+  beta_6_se = na_vec,
+  beta_1_cp = na_vec,
+  beta_2_cp = na_vec,
+  beta_3_cp = na_vec,
+  beta_4_cp = na_vec,
+  beta_5_cp = na_vec,
+  beta_6_cp = na_vec,
+  beta_1_rmse = na_vec,
+  beta_2_rmse = na_vec,
+  beta_3_rmse = na_vec,
+  beta_4_rmse = na_vec,
+  beta_5_rmse = na_vec,
+  beta_6_rmse = na_vec,
+  th_se_beta_1_adj = na_vec,
+  th_se_beta_2_adj = na_vec,
+  th_se_beta_3_adj = na_vec,
+  th_se_beta_4_Adj = na_vec,
+  th_se_beta_5_Adj = na_vec,
+  th_se_beta_6_Adj = na_vec,
+  beta_1_cp_adj_z = na_vec,
+  beta_2_cp_adj_z = na_vec,
+  beta_3_cp_adj_z = na_vec,
+  beta_4_cp_adj_z = na_vec,
+  beta_5_cp_adj_z = na_vec,
+  beta_6_cp_adj_z = na_vec,
+  beta_1_cp_adj_t = na_vec,
+  beta_2_cp_adj_t = na_vec,
+  beta_3_cp_adj_t = na_vec,
+  beta_4_cp_adj_t = na_vec,
+  beta_5_cp_adj_t = na_vec,
+  beta_6_cp_adj_t = na_vec,
+  beta_1_ci_lb_unadj = na_vec,
+  beta_2_ci_lb_unadj = na_vec,
+  beta_3_ci_lb_unadj = na_vec,
+  beta_4_ci_lb_unadj = na_vec,
+  beta_5_ci_lb_unadj = na_vec,
+  beta_6_ci_lb_unadj = na_vec,
+  beta_1_ci_ub_unadj = na_vec,
+  beta_2_ci_ub_unadj = na_vec,
+  beta_3_ci_ub_unadj = na_vec,
+  beta_4_ci_ub_unadj = na_vec,
+  beta_5_ci_ub_unadj = na_vec,
+  beta_6_ci_ub_unadj = na_vec,
+  beta_1_ci_lb_adj_z = na_vec,
+  beta_2_ci_lb_adj_z = na_vec,
+  beta_3_ci_lb_adj_z = na_vec,
+  beta_4_ci_lb_adj_z = na_vec,
+  beta_5_ci_lb_adj_z = na_vec,
+  beta_6_ci_lb_adj_z = na_vec,
+  beta_1_ci_ub_adj_z = na_vec,
+  beta_2_ci_ub_adj_z = na_vec,
+  beta_3_ci_ub_adj_z = na_vec,
+  beta_4_ci_ub_adj_z = na_vec,
+  beta_5_ci_ub_adj_z = na_vec,
+  beta_6_ci_ub_adj_z = na_vec,
+  beta_1_ci_lb_adj_t = na_vec,
+  beta_2_ci_lb_adj_t = na_vec,
+  beta_3_ci_lb_adj_t = na_vec,
+  beta_4_ci_lb_adj_t = na_vec,
+  beta_5_ci_lb_adj_t = na_vec,
+  beta_6_ci_lb_adj_t = na_vec,
+  beta_1_ci_ub_adj_t = na_vec,
+  beta_2_ci_ub_adj_t = na_vec,
+  beta_3_ci_ub_adj_t = na_vec,
+  beta_4_ci_ub_adj_t = na_vec,
+  beta_5_ci_ub_adj_t = na_vec,
+  beta_6_ci_ub_adj_t = na_vec
+)
+j = 1
+
+for(j in 1:length(result_list)) {
+  n <- coef_est$sample_size[j]<- result_list[[j]]$sample_size
+  t <- coef_est$total_T[j] <- result_list[[j]]$total_T
+  # Calculate power
+  data <- result_list[[j]]
+
+  # Store the coefficient from lme for all simulation
+  # row = coef, col = simulation
+  coef_method <- sapply(result_list[[j]]$result, function(l) l$beta_hat)
+  th_se <- sapply(result_list[[j]]$result, function(l) l$beta_se)
+  th_se_adj <- sapply(result_list[[j]]$result, function(l) l$beta_se_adjusted)
+  ci_unadj_lb <- sapply(result_list[[j]]$result, function(l) l$ci_unadj[,1])
+  ci_unadj_ub <- sapply(result_list[[j]]$result, function(l) l$ci_unadj[,2])
+  ci_adj_lb_z <- sapply(result_list[[j]]$result, function(l) l$ci_adj_z[,1])
+  ci_adj_ub_z <- sapply(result_list[[j]]$result, function(l) l$ci_adj_z[,2])
+  ci_adj_lb_t <- sapply(result_list[[j]]$result, function(l) l$ci_adj_t[,1])
+  ci_adj_ub_t <- sapply(result_list[[j]]$result, function(l) l$ci_adj_t[,2])
+  
+  # Average of all betas (simulation  - true coef),
+  coef_est[j, 3:8] <- rowMeans(coef_method) - param
+  coef_est[j, 9:14] <- rowMeans(th_se)
+  coef_est[j, 15:20] <- apply(coef_method, 1, sd)
+  coef_est[j, 33:38] <- rowMeans(th_se_adj)
+
+  # see if it's inside the confidence interval
+  # see the binary yes or no cp
+  # unadj cp
+  coef_est[j, 21:26] <-
+    sapply(1:6, function(i)
+      mean(
+        (param[i] >= ci_unadj_lb[i,] ) &
+          (param[i] <= ci_unadj_ub[i,])
+      ))
+  
+  coef_est[j, 87:92] <-
+    sapply(1:6, function(i)
+      mean(
+        (param[i] >= coef_method[i,] - 1.96 * th_se[i,]) &
+          (param[i] <= coef_method[i,] + 1.96 * th_se[i,])
+      ))
+  
+  # adj cp with z 
+  coef_est[j, 39:44] <-
+    sapply(1:6, function(i)
+      mean(
+        (param[i] >= ci_adj_lb_z[i,]) &
+          (param[i] <= ci_adj_ub_z[i,])
+      ))
+  
+  # adj cp with t
+  coef_est[j, 45:50] <-
+    sapply(1:6, function(i)
+      mean(
+        (param[i] >= ci_adj_lb_t[i,]) &
+          (param[i] <= ci_adj_ub_t[i,])
+      ))
+  
+  # mse = bias^2 + variance unadj
+  coef_est[j, 27:32] <- sqrt((coef_est[j,3:6]) ^ 2 + (coef_est[j, 11:14]) ^ 2)
+  
+  # ci undajust lowerbound and upperbound
+  coef_est[j, 51:56] <- rowMeans(ci_unadj_lb)
+  coef_est[j, 57:62] <- rowMeans(ci_unadj_ub)
+  
+  # ci z-adjusted lowerbound and upperbound
+  coef_est[j, 63:68] <- rowMeans(ci_adj_lb_z)
+  coef_est[j, 69:74] <- rowMeans(ci_adj_ub_z)
+  
+  # ci t-adjusted lowerbound and upperbound
+  coef_est[j, 75:80] <- rowMeans(ci_adj_lb_t)
+  coef_est[j, 81:86] <- rowMeans(ci_adj_ub_t)
+  
+  # ci unaddjusted manually calculated lowerbound and upperbound
+  coef_est[j, 93:98] <- rowMeans(coef_method - 1.96 * th_se)
+  coef_est[j, 99:104] <- rowMeans(coef_method + 1.96 * th_se)
+}
+coef_est
+```
+
+
+```{r}
+beta_1_ci <- coef_est %>% dplyr::select(sample_size, beta_1_ci_lb_unadj, beta_1_ci_ub_unadj,beta_1_ci_lb_adj_z, beta_1_ci_ub_adj_z, beta_1_ci_lb_adj_t, beta_1_ci_ub_adj_t )
+
+beta_2_ci <- coef_est %>% dplyr::select(sample_size, beta_2_ci_lb_unadj, beta_2_ci_ub_unadj,beta_2_ci_lb_adj_z, beta_2_ci_ub_adj_z, beta_2_ci_lb_adj_t, beta_2_ci_ub_adj_t )
+
+beta_3_ci <- coef_est %>% dplyr::select(sample_size, beta_3_ci_lb_unadj, beta_3_ci_ub_unadj,beta_3_ci_lb_adj_z, beta_3_ci_ub_adj_z, beta_3_ci_lb_adj_t, beta_3_ci_ub_adj_t )
+
+beta_4_ci <- coef_est %>% dplyr::select(sample_size,beta_4_ci_lb_unadj, beta_4_ci_ub_unadj,beta_4_ci_lb_adj_z, beta_4_ci_ub_adj_z, beta_4_ci_lb_adj_t, beta_4_ci_ub_adj_t )
+
+beta_5_ci <- coef_est %>% dplyr::select(sample_size,beta_5_ci_lb_unadj, beta_5_ci_ub_unadj,beta_5_ci_lb_adj_z, beta_5_ci_ub_adj_z, beta_5_ci_lb_adj_t, beta_5_ci_ub_adj_t )
+
+beta_6_ci <- coef_est %>% dplyr::select(sample_size,beta_6_ci_lb_unadj, beta_6_ci_ub_unadj,beta_6_ci_lb_adj_z, beta_6_ci_ub_adj_z, beta_6_ci_lb_adj_t, beta_6_ci_ub_adj_t )
+```
+
+
+
+
+```{r}
+beta_1_table <- coef_est %>% dplyr::select(sample_size, ends_with("beta_1"), starts_with("beta_1"))
+beta_2_table <- coef_est %>% dplyr::select(sample_size, ends_with("beta_2"), starts_with("beta_2"))
+beta_3_table <- coef_est %>% dplyr::select(sample_size, ends_with("beta_3"), starts_with("beta_3"))
+
+beta_4_table <- coef_est %>% dplyr::select(sample_size, ends_with("beta_4"), starts_with("beta_4"))
+beta_5_table <- coef_est %>% dplyr::select(sample_size, ends_with("beta_5"), starts_with("beta_5"))
+beta_6_table <- coef_est %>% dplyr::select(sample_size, ends_with("beta_6"), starts_with("beta_6"))
+```
+
+
+
+
+```{r}
+intercept_1 <- tibble(
+  Bias = coef_est$bias_beta_1,
+  RMSE = coef_est$beta_1_rmse,
+  CP = coef_est$beta_1_cp,
+  CP_adj_z = coef_est$beta_1_cp_adj_z, 
+  CP_adj_t = coef_est$beta_1_cp_adj_t
+)
+
+z_1 <- tibble(
+  Bias = coef_est$bias_beta_2,
+  RMSE = coef_est$beta_2_rmse,
+  CP = coef_est$beta_2_cp,
+  CP_adj_z = coef_est$beta_2_cp_adj_z, 
+  CP_adj_t = coef_est$beta_2_cp_adj_t,
+)
+
+t_1 <- tibble(
+  Bias = coef_est$bias_beta_3,
+  RMSE = coef_est$beta_3_rmse,
+  CP = coef_est$beta_3_cp,
+  CP_adj_z = coef_est$beta_3_cp_adj_z, 
+  CP_adj_t = coef_est$beta_3_cp_adj_t,
+)
+
+intercept_2 <- tibble(
+  Bias = coef_est$bias_beta_4,
+  RMSE = coef_est$beta_4_rmse,
+  CP = coef_est$beta_4_cp,
+  CP_adj_z = coef_est$beta_4_cp_adj_z, 
+  CP_adj_t = coef_est$beta_4_cp_adj_t,
+)
+z_2 <- tibble(
+  Bias = coef_est$bias_beta_5,
+  RMSE = coef_est$beta_5_rmse,
+  CP = coef_est$beta_5_cp,
+  CP_adj_z = coef_est$beta_5_cp_adj_z, 
+  CP_adj_t = coef_est$beta_5_cp_adj_t,
+)
+
+t_2 <- tibble(
+  Bias = coef_est$bias_beta_6,
+  RMSE = coef_est$beta_6_rmse,
+  CP = coef_est$beta_6_cp,
+  CP_adj_z = coef_est$beta_6_cp_adj_z, 
+  CP_adj_t = coef_est$beta_6_cp_adj_t,
+)
+
+```
+
+```{r}
+intercept_1
+```
+
+
+```{r}
+trt_1_tibble <- bind_cols(intercept_1, z_1, t_1) %>%
+  mutate(Treatment = 1, sample_size = coef_est$sample_size) %>%
+  dplyr::select(Treatment, sample_size, everything())
+trt_2_tibble <- bind_cols(intercept_2, z_2, t_2) %>%
+  mutate(Treatment = 2, sample_size = coef_est$sample_size) %>%
+  dplyr::select(Treatment, sample_size, everything())
+
+estimator <- bind_rows(trt_1_tibble, trt_2_tibble)
+
+result <- estimator %>%
+  group_by(Treatment) %>%
+  ungroup %>%
+  mutate(Treatment = replace(Treatment, duplicated(Treatment), ''))
+
+result
+```
+
+```{r results='asis', eval= TRUE}
+print(
+kable(
+  result,
+  format = "latex",
+  booktabs = TRUE,
+  caption = "Performance of MEE",
+  col.names = c("Trt", "Sample size", rep(c("Bias", "RMSE", "CP", "CP(z-adj)","CP(t-adj)" ),3)),
+  escape = FALSE,
+  digits = 3
+) %>%
+  kable_styling(latex_options = c("HOLD_position", "scale_down"),
+                full_width = T) %>%
+  add_header_above(c(
+    " " = 2,
+    "Intercept" = 5,
+    "Zt" = 5,
+    "t" = 5
+  )) %>%
+  row_spec(3, extra_latex_after = "\\cline{1-12}") %>%
+  save_kable("result_table.tex", float = FALSE)
+
+)
+```
+
+
+```{r results='asis', eval= TRUE}
+print(
+kable(
+  beta_1_ci,
+  format = "latex",
+  booktabs = TRUE,
+  caption = "$\\beta_1$ Confidence Interval with different adjustment",
+  col.names = c("Sample size", rep(c("lower ci", "upper ci" ),3)),
+  escape = FALSE,
+  digits = 3
+) %>%
+  kable_styling(latex_options = c("HOLD_position", "scale_down"),
+                full_width = T) %>%
+  add_header_above(c(
+    " " = 1,
+    "unadjusted" = 2,
+    "adjusted with z dist" = 2,
+    "adjusted with t dist" = 2
+  ))
+)
+```
+
+```{r results='asis', eval= TRUE}
+print(
+kable(
+  beta_2_ci,
+  format = "latex",
+  booktabs = TRUE,
+  caption = "$\\beta_2$ Confidence Interval with different adjustment",
+  col.names = c("Sample size", rep(c("lower ci", "upper ci" ),3)),
+  escape = FALSE,
+  digits = 3
+) %>%
+  kable_styling(latex_options = c("HOLD_position", "scale_down"),
+                full_width = T) %>%
+  add_header_above(c(
+    " " = 1,
+    "unadjusted" = 2,
+    "adjusted with z dist" = 2,
+    "adjusted with t dist" = 2
+  ))
+)
+```
+
+```{r results='asis', eval= TRUE}
+print(
+kable(
+  beta_3_ci,
+  format = "latex",
+  booktabs = TRUE,
+  caption = "$\\beta_3$ Confidence Interval with different adjustment",
+  col.names = c("Sample size", rep(c("lower ci", "upper ci" ),3)),
+  escape = FALSE,
+  digits = 3
+) %>%
+  kable_styling(latex_options = c("HOLD_position", "scale_down"),
+                full_width = T) %>%
+  add_header_above(c(
+    " " = 1,
+    "unadjusted" = 2,
+    "adjusted with z dist" = 2,
+    "adjusted with t dist" = 2
+  ))
+)
+```
+
+```{r results='asis', eval= TRUE}
+print(
+kable(
+  beta_4_ci,
+  format = "latex",
+  booktabs = TRUE,
+  caption = "$\\beta_4$ Confidence Interval with different adjustment",
+  col.names = c("Sample size", rep(c("lower ci", "upper ci" ),3)),
+  escape = FALSE,
+  digits = 3
+) %>%
+  kable_styling(latex_options = c("HOLD_position", "scale_down"),
+                full_width = T) %>%
+  add_header_above(c(
+    " " = 1,
+    "unadjusted" = 2,
+    "adjusted with z dist" = 2,
+    "adjusted with t dist" = 2
+  ))
+)
+```

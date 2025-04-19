@@ -1,0 +1,226 @@
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+%
+\documentclass[
+]{article}
+\usepackage{amsmath,amssymb}
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math} % this also loads fontspec
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\ifPDFTeX\else
+  % xetex/luatex font selection
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{xcolor}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\makeatletter
+\def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
+\def\maxheight{\ifdim\Gin@nat@height>\textheight\textheight\else\Gin@nat@height\fi}
+\makeatother
+% Scale images if necessary, so that they will not overflow the page
+% margins by default, and it is still possible to overwrite the defaults
+% using explicit options in \includegraphics[width, height, ...]{}
+\setkeys{Gin}{width=\maxwidth,height=\maxheight,keepaspectratio}
+% Set default figure placement to htbp
+\makeatletter
+\def\fps@figure{htbp}
+\makeatother
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\setcounter{secnumdepth}{-\maxdimen} % remove section numbering
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{wrapfig}
+\usepackage{float}
+\usepackage{subfig}
+\floatplacement{figure}{H}
+\usepackage{subfig}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{wrapfig}
+\usepackage{float}
+\usepackage{colortbl}
+\usepackage{pdflscape}
+\usepackage{tabu}
+\usepackage{threeparttable}
+\usepackage{threeparttablex}
+\usepackage[normalem]{ulem}
+\usepackage{makecell}
+\usepackage{xcolor}
+\ifLuaTeX
+  \usepackage{selnolig}  % disable illegal ligatures
+\fi
+\usepackage{bookmark}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same}
+\hypersetup{
+  pdftitle={Simulation 1\_1},
+  pdfauthor={Jeremy J Lin},
+  hidelinks,
+  pdfcreator={LaTeX via pandoc}}
+
+\title{Simulation 1\_1}
+\author{Jeremy J Lin}
+\date{2024-09-28}
+
+\begin{document}
+\maketitle
+
+\section{Simulation Settings}\label{simulation-settings}
+
+Consistency simulation for Estimator performed over 1000 rep simulation.
+
+Data generative model :
+
+\begin{align*}
+  Y_{it, 1} | H_t, A_t &= I_{(A_{it} = 1)}(\beta_1  + \beta_2 Z_{it} + \beta_3 t)+ I_{(A_{i,t} = 2)}(\beta_4 + \beta_5 Z_{it} + \beta_6 t) + (0.2 I_{Z_{it} = 0} + 0.5 I_{Z_{it} = 1} + 0.4 I_{Z_{it} = 2})+ \alpha t +  \epsilon_{i,t}\\
+  \beta_1 &= 0.1 \text{ (Intercept of treatment 1)}\\
+  \beta_2 &= 0.3 \text{ (slope of treatment 1)}\\
+  \beta_3 &= 0.2 \text{ (Intercept of treatment 2)}\\
+  \beta_4 &= 0.1 \text{ (slope of treatment 2)}
+\end{align*}
+
+\begin{align*}
+  I_t &\sim Bern (1)\\
+  A_{i,t} &= \{0, 1, 2\}\\
+  P(A_{it} = 0 |H_t) &=\tilde{p_0}  = 0.2\\
+  P(A_{it} = 1 |H_t) &=\tilde{p_1}  = 0.5\\
+  P(A_{it} = 2 |H_t) &=\tilde{p_2}  = 0.3\\
+\end{align*}
+
+Working model : \begin{align*}
+  Y_{it, 1} | H_t, A_t &= I_{(A_{it} = 1)}(\beta_1  + \beta_2 Z_{it} + \beta_3 t)+ I_{(A_{i,t} = 2)}(\beta_4 + \beta_5 Z_{it} + \beta_6 t) + (0.2 I_{Z_{it} = 0} + 0.5 I_{Z_{it} = 1} + 0.4 I_{Z_{it} = 2})+ \alpha t +  \epsilon_{i,t}\\
+  \beta_1 &= 0.1 \text{ (Intercept of treatment 1)}\\
+  \beta_2 &= 0.3 \text{ (slope of treatment 1)}\\
+  \beta_3 &= 0.2 \text{ (Intercept of treatment 2)}\\
+  \beta_4 &= 0.1 \text{ (slope of treatment 2)}
+\end{align*}
+
+\section{Parameter}\label{parameter}
+
+\begin{table}[H]
+\centering
+\caption{\label{tab:unnamed-chunk-10}Performance of MEE}
+\centering
+\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{
+\begin{tabu} to \linewidth {>{\raggedright}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X}
+\toprule
+\multicolumn{2}{c}{ } & \multicolumn{5}{c}{Intercept} & \multicolumn{5}{c}{Zt} & \multicolumn{5}{c}{t} \\
+\cmidrule(l{3pt}r{3pt}){3-7} \cmidrule(l{3pt}r{3pt}){8-12} \cmidrule(l{3pt}r{3pt}){13-17}
+Trt & Sample size & Bias & RMSE & CP & CP(z-adj) & CP(t-adj) & Bias & RMSE & CP & CP(z-adj) & CP(t-adj) & Bias & RMSE & CP & CP(z-adj) & CP(t-adj)\\
+\midrule
+1 & 20 & 0.005 & 0.034 & 0.920 & 0.945 & 0.964 & 0.002 & 0.389 & 0.923 & 0.945 & 0.961 & -0.001 & 0.197 & 0.928 & 0.948 & 0.969\\
+ & 30 & 0.009 & 0.030 & 0.934 & 0.952 & 0.966 & -0.008 & 0.324 & 0.924 & 0.943 & 0.956 & 0.000 & 0.164 & 0.936 & 0.950 & 0.962\\
+ & 40 & 0.006 & 0.025 & 0.925 & 0.935 & 0.940 & -0.005 & 0.282 & 0.922 & 0.941 & 0.947 & 0.000 & 0.141 & 0.933 & 0.944 & 0.956\\
+\cline{1-12}\\
+2 & 20 & -0.003 & 0.037 & 0.911 & 0.940 & 0.959 & 0.001 & 0.034 & 0.911 & 0.939 & 0.954 & 0.001 & 0.389 & 0.905 & 0.930 & 0.954\\
+ & 30 & 0.017 & 0.035 & 0.924 & 0.933 & 0.952 & -0.006 & 0.030 & 0.932 & 0.945 & 0.958 & -0.001 & 0.324 & 0.929 & 0.945 & 0.953\\
+\addlinespace
+ & 40 & -0.004 & 0.027 & 0.926 & 0.938 & 0.949 & -0.006 & 0.025 & 0.937 & 0.952 & 0.965 & 0.002 & 0.282 & 0.935 & 0.948 & 0.958\\
+\bottomrule
+\end{tabu}}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{\label{tab:unnamed-chunk-11}$\beta_1$ Confidence Interval with different adjustment}
+\centering
+\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{
+\begin{tabu} to \linewidth {>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X}
+\toprule
+\multicolumn{1}{c}{ } & \multicolumn{2}{c}{unadjusted} & \multicolumn{2}{c}{adjusted with z dist} & \multicolumn{2}{c}{adjusted with t dist} \\
+\cmidrule(l{3pt}r{3pt}){2-3} \cmidrule(l{3pt}r{3pt}){4-5} \cmidrule(l{3pt}r{3pt}){6-7}
+Sample size & lower ci & upper ci & lower ci & upper ci & lower ci & upper ci\\
+\midrule
+20 & -0.595 & 0.805 & -0.666 & 0.877 & -0.761 & 0.971\\
+30 & -0.478 & 0.695 & -0.516 & 0.734 & -0.554 & 0.772\\
+40 & -0.399 & 0.611 & -0.424 & 0.636 & -0.445 & 0.657\\
+\bottomrule
+\end{tabu}}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{\label{tab:unnamed-chunk-12}$\beta_2$ Confidence Interval with different adjustment}
+\centering
+\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{
+\begin{tabu} to \linewidth {>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X}
+\toprule
+\multicolumn{1}{c}{ } & \multicolumn{2}{c}{unadjusted} & \multicolumn{2}{c}{adjusted with z dist} & \multicolumn{2}{c}{adjusted with t dist} \\
+\cmidrule(l{3pt}r{3pt}){2-3} \cmidrule(l{3pt}r{3pt}){4-5} \cmidrule(l{3pt}r{3pt}){6-7}
+Sample size & lower ci & upper ci & lower ci & upper ci & lower ci & upper ci\\
+\midrule
+20 & -0.049 & 0.654 & -0.087 & 0.691 & -0.135 & 0.739\\
+30 & -0.002 & 0.587 & -0.022 & 0.607 & -0.042 & 0.626\\
+40 & 0.042 & 0.549 & 0.029 & 0.562 & 0.019 & 0.572\\
+\bottomrule
+\end{tabu}}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{\label{tab:unnamed-chunk-13}$\beta_3$ Confidence Interval with different adjustment}
+\centering
+\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{
+\begin{tabu} to \linewidth {>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X}
+\toprule
+\multicolumn{1}{c}{ } & \multicolumn{2}{c}{unadjusted} & \multicolumn{2}{c}{adjusted with z dist} & \multicolumn{2}{c}{adjusted with t dist} \\
+\cmidrule(l{3pt}r{3pt}){2-3} \cmidrule(l{3pt}r{3pt}){4-5} \cmidrule(l{3pt}r{3pt}){6-7}
+Sample size & lower ci & upper ci & lower ci & upper ci & lower ci & upper ci\\
+\midrule
+20 & -0.057 & 0.076 & -0.064 & 0.083 & -0.073 & 0.092\\
+30 & -0.046 & 0.066 & -0.050 & 0.069 & -0.053 & 0.073\\
+40 & -0.038 & 0.058 & -0.040 & 0.060 & -0.042 & 0.062\\
+\bottomrule
+\end{tabu}}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{\label{tab:unnamed-chunk-14}$\beta_4$ Confidence Interval with different adjustment}
+\centering
+\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{
+\begin{tabu} to \linewidth {>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X>{\raggedleft}X}
+\toprule
+\multicolumn{1}{c}{ } & \multicolumn{2}{c}{unadjusted} & \multicolumn{2}{c}{adjusted with z dist} & \multicolumn{2}{c}{adjusted with t dist} \\
+\cmidrule(l{3pt}r{3pt}){2-3} \cmidrule(l{3pt}r{3pt}){4-5} \cmidrule(l{3pt}r{3pt}){6-7}
+Sample size & lower ci & upper ci & lower ci & upper ci & lower ci & upper ci\\
+\midrule
+20 & -0.316 & 1.209 & -0.396 & 1.289 & -0.499 & 1.392\\
+30 & -0.168 & 1.102 & -0.210 & 1.145 & -0.252 & 1.186\\
+40 & -0.107 & 0.999 & -0.135 & 1.027 & -0.159 & 1.051\\
+\bottomrule
+\end{tabu}}
+\end{table}
+
+\end{document}

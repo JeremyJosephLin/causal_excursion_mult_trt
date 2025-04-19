@@ -54,7 +54,7 @@ dgm <- function(sample_size, total_T, ft, beta_1, beta_2, gt, alpha, tau, pt, me
     dta$Y[row_index] <- (dta$A1[row_index] * as.numeric(ft[t, ] %*% beta_1)  +
                            dta$A2[row_index] * as.numeric(ft[t, ] %*% beta_2) +
                            as.numeric(gt[t, ] %*% alpha) +   
-                           dta$eps[row_index])*dta$I[row_index]
+                           dta$eps[row_index])
   }
   
   return(dta)

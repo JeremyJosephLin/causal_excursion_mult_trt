@@ -1,0 +1,959 @@
+---
+title: "HeartStep Data Analysis"
+author: "Jeremy Lin"
+date: "2024-04-18"
+output: 
+  pdf_document :
+    keep_tex: true
+    extra_dependencies: "subfig"
+header-includes:
+ - \usepackage{booktabs}
+ - \usepackage{longtable}[=v4.13]% 
+ - \usepackage{array}
+ - \usepackage{multirow}
+ - \usepackage{wrapfig}
+ - \usepackage{float}
+ - \usepackage{subfig}
+ - \floatplacement{figure}{H}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(nlme)
+library(Matrix)
+library(MASS)
+library(rootSolve)
+library(geepack)
+library(lme4)
+library(mvtnorm)
+library(reshape2)
+library(knitr)
+library(ggplot2)
+library(tidyr)
+library(gridExtra)
+library(tidyverse)
+library(dplyr)
+library(kableExtra)
+library(corrplot)
+library(robustHD)
+library(pracma)
+library(xtable)
+library(latex2exp)
+library(janitor)
+library(ggpubr)
+library(lubridate)
+# parallel computing libraries
+library(foreach)
+#library(doMC)
+# beep beep 
+library(beepr)
+library(doParallel)
+library(doSNOW)
+library(utils)
+library(foreach)
+library(doRNG)
+library(geepack)
+```
+
+```{r echo=FALSE}
+#rm(list = ls())
+
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, 
+                      warning = FALSE, results = "hide", 
+                      fig.pos = 'H', cache = FALSE, 
+                      eval = TRUE)
+# load functions
+source("~/Documents/Research/causal_excursion_mult_trt/R code/functions_util.R")
+
+# load data set 
+dta <- readRDS("~/Documents/Research/causal_excursion_mult_trt/Data Analysis/HeartStep/dataset/HeartSteps_data_primary_analysis.RDS")
+```
+
+
+# Exploratory Data Analysis 
+
+```{r}
+# EDA 
+#summary(dta)
+
+# n_sample = 37 participants (paper said 42 so 5 drop during the study?)
+n_sample = length(unique(dta$user.index))
+
+# check decision index for participant 1 
+dta[which(dta$user.index == 1), "decision.index.nogap.new"]
+
+# create table for participant versus timepoints 
+na_vec <- rep(NA, n_sample)
+id_tbl <- data.frame(
+  id = na_vec,
+  n_timepoints = na_vec,
+  max_time = na_vec ,
+  time_complete = na_vec
+)
+
+for (i in 1:n_sample) {
+  id_tbl$id[i] <- i
+  time_i <- dta[which(dta$user.index == i), "decision.index.nogap.new"]
+  id_tbl$n_timepoints[i] <- dim(time_i)[1] 
+  id_tbl$max_time[i] <- max(time_i$decision.index.nogap.new)
+  id_tbl$time_complete[i] <- id_tbl$n_timepoints[i] == (id_tbl$max_time[i] + 1)
+}
+
+id_tbl
+
+# participant 4 have a missing timepoint (missing time 0)
+which(id_tbl$time_complete == FALSE)
+head(dta[which(dta$user.index == 4), "decision.index.nogap.new"])
+
+# seems like there's missing data in Jbsteps30 pre and jbsteps30
+# check if the missingness is related  
+# missing pre steps doesnt imply missing step
+# 473 inidividual missing both prestep and post step 
+summary(dta[which(is.na(dta$jbsteps30pre)), "jbsteps30"])
+summary(dta[which(is.na(dta$jbsteps30)), "jbsteps30pre"])
+
+# check availability 
+head(dta$avail)
+unique(dta$avail)
+# create boolean variable for  availability (1= available, 0 = false)
+dta$I <- ifelse(dta$avail=="True", 1, 0)
+
+
+# check treatment versus availability 
+dta[which(dta$I == 0 & dta$treatment != 0), "treatment"]
+# three timepoints get assigned treatment when user is not available
+wrong_trt <- dta %>% filter(I == 0 & treatment !=0) %>% dplyr::select(user.index, decision.index.nogap.new, avail, treatment )
+
+```
+
+Some  Problem from the dataset : 
+
+- -Participant 4 is missing time point 0. 
+- Three Participants was assigned treatment although they are not available
+```{r results='asis'}
+print(
+kable(
+  wrong_trt,
+  caption = "Intercept model no moderator",
+  col.names = c("User Id", "Decision Time", "Available", "Treatment"),
+  digits = 3
+)
+%>% kable_styling(latex_options = c("HOLD_position", "scale_down")))
+
+
+```
+- In Klansja papertated that during the 42 days of study duration, each participants can received up to 210 decision points, but some participants in the data set have more than 210 decision points. We will truncate data set to 210. 
+
+```{r eval=FALSE}
+# example of prestep trajectory for patient 2 in the first 100 time points 
+dta %>% 
+  filter(decision.index.nogap.new <=100, user.index == 2) %>% 
+  ggplot(aes(x = decision.index.nogap.new, y =jbsteps30pre, color = factor(user.index)))+
+  geom_line()
+
+# example of prestep trajectory for patient 2 in the first 100 time points 
+dta %>% 
+  filter(decision.index.nogap.new <=100, user.index == 2) %>% 
+  ggplot(aes(x = decision.index.nogap.new, y =jbsteps30, color = factor(user.index)))+
+  geom_line()
+
+# prestep versus step
+dta %>% 
+  ggplot(aes(x = jbsteps30, y =jbsteps30pre))+
+  geom_point(alpha = 0.2)
+```
+
+```{r eval=TRUE, out.width="70%"}
+# histogram of maximum time 
+hist(dta$decision.index.nogap.new, main= "decision time points before truncation")
+```
+
+\pagebreak
+
+```{r}
+# data transformation
+# treating missing Data (TQ notes to 0)
+dta$jbsteps30pre[which(is.na(dta$jbsteps30pre))] <- 0
+dta$jbsteps30[which(is.na(dta$jbsteps30))] <- 0
+
+# add time 0 for user id4, impute this manually 
+dta %>% filter(user.index== 4)
+time0 <-
+  dta %>% filter(user.index == 4 &
+                   decision.index.nogap.new == 1) %>%
+  mutate(
+    jbsteps30pre = 0 ,
+    jbsteps30pre.zero = 0,
+    jbsteps30 = 0,
+    decision.index.nogap.new = 0,
+    decision.index.nogap.new,
+    avail = FALSE,
+    treatment = 0,
+    I = 0,
+    sugg.decision.utime = sugg.decision.utime - 3 * 60
+  )
+dta <- rbind(dta, time0)
+dta <- dta %>% arrange(user.index, decision.index.nogap.new)
+
+
+# truncate data to 210 decision points 
+dta <- dta %>% filter(decision.index.nogap.new <=209)
+
+# fix individual who are not available but still get trt
+# treat step as missing 
+dta[which(dta$I == 0 & dta$treatment !=0),"jbstep30"] <-0
+# change trt to 0 
+dta[which(dta$I == 0 & dta$treatment !=0),"treatment"] <- 0
+#double check id with problematic availability 
+dta %>% filter(user.index %in% wrong_trt$user.index) %>% filter(decision.index.nogap.new %in% wrong_trt$decision.index.nogap.new)
+
+# Find day of the week
+dta$day.of.week <- wday(dta$sugg.decision.utime, label = TRUE)
+# binary variable for weekend (1= weekend)
+dta$is.weekend <- sapply(dta$day.of.week, function(l) ifelse(l=="Sat" || l=="Sun", 1, 0))
+
+#binary variable for location (1 = work or home, 0 otherwise)
+dta$loc.home.work <- sapply(dta$dec.location.category, function(l) ifelse(l=="home" || l=="work", 1, 0))
+
+# log transform since outcome is right skewed(from Paper)
+dta$log.jbsteps30 <- log(dta$jbsteps30 + 0.5)
+dta$log.jbsteps30pre <- log(dta$jbsteps30pre + 0.5)
+# add probability treatment (required in our estimator)
+dta$prob_A <- sapply(dta$treatment, function(l) ifelse(l == 0, 0.4, 
+                                    ifelse(l == 1, 0.3, 0.3)) )
+
+# create lag variable
+dta$jbsteps30.lag  <- c(0,head(dta$jbsteps30,-1))
+dta$log.jbsteps30.lag  <- c(0,head(dta$log.jbsteps30,-1))
+
+dta <- as.data.frame(dta)
+
+# # save data 
+# saveRDS(HeartSteps_data_primary_analysis, "HeartSteps_data_primary_analysis_modified.RDS")
+# write_csv(HeartSteps_data_primary_analysis, "HeartSteps_data_primary_analysis_modified.csv")
+```
+
+
+```{r}
+# estimate availability
+# empirical estimate
+# max time point 
+time_max <- max(id_tbl$max_time)
+It_estimate <- rep(NA, time_max)
+for (i in 1:time_max) {
+  It_estimate[i] <- mean(dta[which(dta$decision.index.nogap.new == i), "I"])
+}
+
+
+# availability is roughly around 0.8 (after time 210 is fluctuating due to not that many individual have them)
+#It_estimate
+
+#summary(dta)
+```
+
+```{r eval=FALSE}
+# plot some histogram for the outcome
+hist(dta$jbsteps30pre)
+hist(dta$jbsteps30)
+hist(dta$log.jbsteps30)
+```
+
+```{r eval=FALSE}
+# checking availability probability 
+dta %>% group_by(loc.home.work) %>%  summarise(mean = mean(I))  
+dta %>% group_by(is.weekend) %>%  summarise(mean = mean(I))                  
+
+# do logistic regression to check effect of decision point to availability 
+fit <- glm(data = dta, I ~ decision.index.nogap.new, family = binomial)
+summary(fit)
+
+
+# availability depends on location but not based on time (decision time point or whether it is weekend)
+# for now just model tau(t) as constant w.r.t time 
+tau <- mean(dta$I)
+```
+
+# Analysis using steps as outcome
+
+```{r fit1}
+# fitting our estimator 
+id_varname = c("user.index")
+decision_time_varname = c("decision.index.nogap.new")
+treatment_varname = c("treatment")
+
+avail_varname = c("I")
+rand_prob_varname = "prob_A"
+trt_level = 2
+
+moderator_varname <- c()
+outcome_varname = c("jbsteps30")
+control_varname <- c("is.weekend", "loc.home.work", "decision.index.nogap.new","jbsteps30pre", "jbsteps30.lag")
+
+fit1a <- wcls_categorical_treatment(
+  dta = dta,
+  id_varname = id_varname,
+  decision_time_varname = decision_time_varname,
+  treatment_varname = treatment_varname,
+  outcome_varname = outcome_varname,
+  control_varname = control_varname,
+  moderator_varname = moderator_varname,
+  rand_prob_varname = rand_prob_varname,
+  avail_varname = avail_varname,
+  trt_level = trt_level,
+  estimator_initial_value = NULL
+)
+
+#fit1a$conf_int_adjusted_t
+
+# fit 1 b use time as moderator
+moderator_varname = c("decision.index.nogap.new")
+
+fit1b <- wcls_categorical_treatment(
+  dta = dta,
+  id_varname = id_varname,
+  decision_time_varname = decision_time_varname,
+  treatment_varname = treatment_varname,
+  outcome_varname = outcome_varname,
+  control_varname = control_varname,
+  moderator_varname = moderator_varname,
+  rand_prob_varname = rand_prob_varname,
+  avail_varname = avail_varname,
+  trt_level = trt_level,
+  estimator_initial_value = NULL
+)
+
+#fit1b$conf_int_adjusted_t
+
+# fit 1c use location as moderator 
+moderator_varname = c("loc.home.work")
+
+fit1c <- wcls_categorical_treatment(
+  dta = dta,
+  id_varname = id_varname,
+  decision_time_varname = decision_time_varname,
+  treatment_varname = treatment_varname,
+  outcome_varname = outcome_varname,
+  control_varname = control_varname,
+  moderator_varname = moderator_varname,
+  rand_prob_varname = rand_prob_varname,
+  avail_varname = avail_varname,
+  trt_level = trt_level,
+  estimator_initial_value = NULL
+)
+
+#fit1c$conf_int_adjusted_t
+
+
+
+```
+
+
+```{r result_fit1}
+res1a <- data.frame(Estimate =fit1a$beta_hat,
+           Sd = fit1a$beta_se)
+res1a <- cbind(res1a, fit1a$conf_int, fit1a$conf_int_adjusted_z, fit1a$conf_int_adjusted_t)
+
+res1b <- data.frame(Estimate =fit1b$beta_hat,
+           Sd = fit1b$beta_se)
+res1b <- cbind(res1b, fit1b$conf_int, fit1b$conf_int_adjusted_z, fit1b$conf_int_adjusted_t)
+
+res1c <- data.frame(Estimate =fit1c$beta_hat,
+           Sd = fit1c$beta_se)
+res1c <- cbind(res1c, fit1c$conf_int, fit1c$conf_int_adjusted_z, fit1c$conf_int_adjusted_t)
+
+```
+
+```{r results='asis', eval= TRUE}
+# print(
+# kable(
+#   res1a,
+#   format = "latex",
+#   booktabs = TRUE,
+#   caption = "Performance of MEE",
+#   col.names = c("Estimate", "Std. Error", rep(c("2.5%", "97.5%"),3)),
+#   escape = FALSE,
+#   digits = 3
+# ) %>%
+#   kable_styling(latex_options = c("HOLD_position", "scale_down"),
+#                 full_width = T) %>%
+#   add_header_above(c(
+#     " " = 3,
+#     "unadjusted" = 2,
+#     "z adjusted" = 2,
+#     "t adjusted" = 2
+#   )) %>%
+#   row_spec(3, extra_latex_after = "\\cline{1-12}"))
+```
+
+```{r results='asis'}
+print(
+kable(
+  res1a,
+  caption = "jbstep30 Intercept model no moderator",
+  digits = 3
+) %>%
+  add_header_above(c(
+    " " = 1,
+    "Effect" = 2,
+    "unadjusted" = 2,
+    "z adjusted" = 2,
+    "t adjusted" = 2
+  ))
+)
+```
+
+
+```{r results='asis'}
+print(
+kable(
+  res1b,
+  caption = "jbstep30 decision point as moderator",
+  digits = 3
+) %>%
+  add_header_above(c(
+    " " = 1,
+    "Effect" = 2,
+    "unadjusted" = 2,
+    "z adjusted" = 2,
+    "t adjusted" = 2
+  ))
+)
+```
+
+```{r results='asis'}
+print(
+kable(
+  res1c,
+  caption = "jbstep30 home and work as moderator",
+  digits = 3
+) %>%
+  add_header_above(c(
+    " " = 1,
+    "Effect" = 2,
+    "unadjusted" = 2,
+    "z adjusted" = 2,
+    "t adjusted" = 2
+  ))
+)
+```
+
+\pagebreak
+
+# Analysis using log scale steps as outcome
+
+```{r fit2}
+outcome_varname = c("log.jbsteps30")
+control_varname <- c("is.weekend", "loc.home.work","decision.index.nogap.new", "log.jbsteps30pre", "log.jbsteps30.lag")
+moderator_varname <- c()
+
+fit2a <- wcls_categorical_treatment(
+  dta = dta,
+  id_varname = id_varname,
+  decision_time_varname = decision_time_varname,
+  treatment_varname = treatment_varname,
+  outcome_varname = outcome_varname,
+  control_varname = control_varname,
+  moderator_varname = moderator_varname,
+  rand_prob_varname = rand_prob_varname,
+  avail_varname = avail_varname,
+  trt_level = trt_level,
+  estimator_initial_value = NULL
+)
+
+
+# fit 2b use time as moderator
+moderator_varname = c("decision.index.nogap.new")
+
+fit2b <- wcls_categorical_treatment(
+  dta = dta,
+  id_varname = id_varname,
+  decision_time_varname = decision_time_varname,
+  treatment_varname = treatment_varname,
+  outcome_varname = outcome_varname,
+  control_varname = control_varname,
+  moderator_varname = moderator_varname,
+  rand_prob_varname = rand_prob_varname,
+  avail_varname = avail_varname,
+  trt_level = trt_level,
+  estimator_initial_value = NULL
+)
+
+moderator_varname = c("loc.home.work")
+fit2c <- wcls_categorical_treatment(
+  dta = dta,
+  id_varname = id_varname,
+  decision_time_varname = decision_time_varname,
+  treatment_varname = treatment_varname,
+  outcome_varname = outcome_varname,
+  control_varname = control_varname,
+  moderator_varname = moderator_varname,
+  rand_prob_varname = rand_prob_varname,
+  avail_varname = avail_varname,
+  trt_level = trt_level,
+  estimator_initial_value = NULL
+)
+
+```
+
+
+```{r}
+outcome_varname = c("log.jbsteps30")
+control_varname <- c()
+moderator_varname <- c()
+
+fit <- wcls_categorical_treatment(
+  dta = dta,
+  id_varname = id_varname,
+  decision_time_varname = decision_time_varname,
+  treatment_varname = treatment_varname,
+  outcome_varname = outcome_varname,
+  control_varname = control_varname,
+  moderator_varname = moderator_varname,
+  rand_prob_varname = rand_prob_varname,
+  avail_varname = avail_varname,
+  trt_level = trt_level,
+  estimator_initial_value = NULL
+)
+
+fit
+
+summary(dta$log.jbsteps30)
+summary(dta$jbsteps30)
+```
+
+
+```{r result_fit2}
+# fit summary to get pvalue
+fit2a_summary <- wcls_summary(fit2a)
+fit2b_summary <- wcls_summary(fit2b)
+fit2c_summary <- wcls_summary(fit2c)
+
+# marginal effect
+res2a <- data.frame(Estimate = fit2a$beta_hat,
+           Sd = fit2a$beta_se)
+res2a <- cbind(res2a, fit2a$conf_int_adjusted_t, p_val = fit2a_summary$`Pr(>|t|)`)
+
+exp_betahat_2a <- exp(fit2a$beta_hat)
+exp_ci_unadj2a <- exp(fit2a$conf_int)
+exp_ci_adj_z_2a <- exp(fit2a$conf_int_adjusted_z)
+exp_ci_adj_t_2a <- exp(fit2a$conf_int_adjusted_t)
+
+# time effect 
+res2b <- data.frame(Estimate =fit2b$beta_hat,
+           Sd = fit2b$beta_se)
+res2b <- cbind(res2b, fit2b$conf_int_adjusted_t, p_val = fit2b_summary$`Pr(>|t|)`)
+
+exp_betahat_2b <- exp(fit2b$beta_hat)
+exp_ci_unadj2b <- exp(fit2b$conf_int)
+exp_ci_adj_z_2b <- exp(fit2b$conf_int_adjusted_z)
+exp_ci_adj_t_2b <- exp(fit2b$conf_int_adjusted_t)
+
+
+# location effect. 
+res2c <- data.frame(Estimate =fit2c$beta_hat,
+           Sd = fit2c$beta_se)
+res2c <- cbind(res2c, fit2c$conf_int_adjusted_t, p_val = fit2c_summary$`Pr(>|t|)`)
+
+exp_betahat_2c <- exp(fit2c$beta_hat)
+exp_ci_unadj2c <- exp(fit2c$conf_int)
+exp_ci_adj_z_2c <- exp(fit2c$conf_int_adjusted_z)
+exp_ci_adj_t_2c <- exp(fit2c$conf_int_adjusted_t)
+```
+
+
+<!-- This part is deprecated, we will use wcls_glh function instead -->
+
+```{r }
+# # between treatment marginal
+a <- matrix(c(1, -1), ncol = 1)
+diff_2a <- t(a) %*%fit2a$beta_hat
+name_beta <- names(fit2a$beta_hat)
+rownames(diff_2a) <- "Intercept"
+var_diff_unadj <- t(a) %*% fit2a$varcov[name_beta, name_beta] %*% a
+var_diff_adj <- t(a) %*% fit2a$varcov_adjusted[name_beta, name_beta] %*% a
+
+### 5. calculate confidence interval
+conf_int_diff2a <-
+  cbind(diff_2a - 1.96 * sqrt(var_diff_unadj), diff_2a + 1.96 *  sqrt(var_diff_unadj))
+conf_int_adjusted_z_diff2a <-
+  cbind(diff_2a - 1.96 * sqrt(var_diff_adj),
+        diff_2a + 1.96 * sqrt(var_diff_adj))
+c <- qt(1 - 0.05/2, df = 37 - 2 - 6)
+conf_int_adjusted_t_diff2a <-
+  cbind(diff_2a - c * sqrt(var_diff_adj),
+        diff_2a + c * sqrt(var_diff_adj))
+colnames(conf_int_diff2a) <- colnames(conf_int_adjusted_z_diff2a) <- colnames(conf_int_adjusted_t_diff2a) <- c("2.5 %", "97.5 %")
+```
+
+```{r}
+# between treatment time
+a <- matrix(c(1, 0, -1, 0, 0, 1, 0, -1), ncol = 4, byrow = TRUE)
+diff_2b <- a %*%fit2b$beta_hat
+name_beta <- names(fit2b$beta_hat)
+rownames(diff_2b) <- c("Intercept", "Time")
+covar_diff_unadj <- a %*% fit2b$varcov[name_beta, name_beta] %*% t(a)
+covar_diff_adj <- a %*% fit2b$varcov_adjusted[name_beta, name_beta] %*% t(a)
+var_diff_unadj <- as.matrix(diag(covar_diff_unadj), nrow = 2)
+var_diff_adj <- as.matrix(diag(covar_diff_adj), nrow = 2)
+
+### 5. calculate confidence interval
+conf_int_diff2b <-
+  cbind(diff_2b - 1.96 * sqrt(var_diff_unadj), 
+        diff_2b + 1.96 *  sqrt(var_diff_unadj))
+conf_int_adjusted_z_diff2b <-
+  cbind(diff_2b - 1.96 * sqrt(var_diff_adj),
+        diff_2b + 1.96 * sqrt(var_diff_adj))
+c <- qt(1 - 0.05/2, df = 37 - 2 - 6)
+conf_int_adjusted_t_diff2b <-
+  cbind(diff_2b - c * sqrt(var_diff_adj),
+        diff_2b + c * sqrt(var_diff_adj))
+colnames(conf_int_diff2b) <- colnames(conf_int_adjusted_z_diff2b) <- colnames(conf_int_adjusted_t_diff2b) <- c("2.5 %", "97.5 %")
+```
+
+```{r}
+# between treatment location
+a <- matrix(c(1, 1, -1, -1), ncol = 4, byrow = TRUE)
+diff_2c <- a %*%fit2c$beta_hat
+name_beta <- names(fit2c$beta_hat)
+rownames(diff_2c) <- c("loc:1")
+covar_diff_unadj <- a %*% fit2c$varcov[name_beta, name_beta] %*% t(a)
+covar_diff_adj <- a %*% fit2c$varcov_adjusted[name_beta, name_beta] %*% t(a)
+var_diff_unadj <- as.matrix(diag(covar_diff_unadj), nrow = 2)
+var_diff_adj <- as.matrix(diag(covar_diff_adj), nrow = 2)
+
+### 5. calculate confidence interval
+conf_int_diff2c <-
+  cbind(diff_2c - 1.96 * sqrt(var_diff_unadj), 
+        diff_2c + 1.96 *  sqrt(var_diff_unadj))
+
+conf_int_adjusted_z_diff2c <-
+  cbind(diff_2c - 1.96 * sqrt(var_diff_adj),
+        diff_2c + 1.96 * sqrt(var_diff_adj))
+
+c <- qt(1 - 0.05/2, df = 37 - 2 - 6)
+conf_int_adjusted_t_diff2c <-
+  cbind(diff_2c - c * sqrt(var_diff_adj),
+        diff_2c + c * sqrt(var_diff_adj))
+
+colnames(conf_int_diff2c) <- colnames(conf_int_adjusted_z_diff2c) <- colnames(conf_int_adjusted_t_diff2c) <- c("2.5 %", "97.5 %")
+```
+
+
+```{r}
+# effect from trt 1 at home or work
+a <- matrix(c(1, 1, 0, 0), ncol = 4, byrow = TRUE)
+diff_2c1 <- a %*%fit2c$beta_hat
+name_beta <- names(fit2c$beta_hat)
+rownames(diff_2c1) <- c("trt1_loc1")
+covar_diff_unadj <- a %*% fit2c$varcov[name_beta, name_beta] %*% t(a)
+covar_diff_adj <- a %*% fit2c$varcov_adjusted[name_beta, name_beta] %*% t(a)
+var_diff_unadj <- as.matrix(diag(covar_diff_unadj), nrow = 2)
+var_diff_adj <- as.matrix(diag(covar_diff_adj), nrow = 2)
+
+### 5. calculate confidence interval
+conf_int_diff2c1 <-
+  cbind(diff_2c1 - 1.96 * sqrt(var_diff_unadj), 
+        diff_2c1 + 1.96 *  sqrt(var_diff_unadj))
+
+conf_int_adjusted_z_diff2c1 <-
+  cbind(diff_2c1 - 1.96 * sqrt(var_diff_adj),
+        diff_2c1 + 1.96 * sqrt(var_diff_adj))
+
+c <- qt(1 - 0.05/2, df = 37 - 2 - 6)
+conf_int_adjusted_t_diff2c1 <-
+  cbind(diff_2c1 - c * sqrt(var_diff_adj),
+        diff_2c1 + c * sqrt(var_diff_adj))
+
+colnames(conf_int_diff2c1) <- colnames(conf_int_adjusted_z_diff2c1) <- colnames(conf_int_adjusted_t_diff2c1) <- c("2.5 %", "97.5 %")
+```
+
+```{r}
+# effect from trt 1 at home or work
+a <- matrix(c(0, 0, 1, 1), ncol = 4, byrow = TRUE)
+diff_2c2 <- a %*%fit2c$beta_hat
+name_beta <- names(fit2c$beta_hat)
+rownames(diff_2c2) <- c("trt2_loc1")
+covar_diff_unadj <- a %*% fit2c$varcov[name_beta, name_beta] %*% t(a)
+covar_diff_adj <- a %*% fit2c$varcov_adjusted[name_beta, name_beta] %*% t(a)
+var_diff_unadj <- as.matrix(diag(covar_diff_unadj), nrow = 2)
+var_diff_adj <- as.matrix(diag(covar_diff_adj), nrow = 2)
+
+### 5. calculate confidence interval
+conf_int_diff2c2 <-
+  cbind(diff_2c2 - 1.96 * sqrt(var_diff_unadj), 
+        diff_2c2 + 1.96 *  sqrt(var_diff_unadj))
+
+conf_int_adjusted_z_diff2c2 <-
+  cbind(diff_2c2 - 1.96 * sqrt(var_diff_adj),
+        diff_2c2 + 1.96 * sqrt(var_diff_adj))
+
+c <- qt(1 - 0.05/2, df = 37 - 2 - 6)
+conf_int_adjusted_t_diff2c2 <-
+  cbind(diff_2c2 - c * sqrt(var_diff_adj),
+        diff_2c2 + c * sqrt(var_diff_adj))
+
+colnames(conf_int_diff2c2) <- colnames(conf_int_adjusted_z_diff2c2) <- colnames(conf_int_adjusted_t_diff2c2) <- c("2.5 %", "97.5 %")
+```
+
+```{r}
+res_diff_2a <- cbind(diff_2a, conf_int_diff2a, conf_int_adjusted_z_diff2a , conf_int_adjusted_t_diff2a)
+res_diff_2b <- cbind(diff_2b, conf_int_diff2b, conf_int_adjusted_z_diff2b , conf_int_adjusted_t_diff2b)
+res_diff_2c <- cbind(diff_2c, conf_int_diff2c, conf_int_adjusted_z_diff2c , conf_int_adjusted_t_diff2c)
+res_diff_2c1 <- cbind(diff_2c1, conf_int_diff2c1, conf_int_adjusted_z_diff2c1 , conf_int_adjusted_t_diff2c1)
+res_diff_2c2 <- cbind(diff_2c2, conf_int_diff2c2, conf_int_adjusted_z_diff2c2 , conf_int_adjusted_t_diff2c2)
+```
+
+<!-- end of deprecated part -->
+```{r diff2a}
+L2a <- matrix(c(1, -1), nrow = 1)
+diff2a <- wcls_glh(fit2a, L2a)
+
+resdiff2a <- data.frame(name = c("beta1 - beta2"),
+                   Estimate = diff2a$summary$Estimate, 
+                   Sd = diff2a$summary$`Std. Error`, 
+                   diff2a$conf_int, 
+                   p_val = diff2a$summary$`Pr(>|t|)`)
+```
+
+```{r diff2b}
+L2b <- matrix(c(1, 0, -1, 0, 0, 1, 0, -1), ncol = 4, byrow = TRUE)
+diff2b <- wcls_glh(fit2b, L2b)
+
+resdiff2b <- data.frame(name = c("beta1 - beta3", "beta2 - beta4"),
+                   Estimate = diff2b$summary$Estimate, 
+                   Sd = diff2b$summary$`Std. Error`, 
+                   diff2b$conf_int, 
+                   p_val = diff2b$summary$`Pr(>|t|)`)
+# simultaneous p value
+resdiff2b <- rbind(resdiff2b, c("simultaneous", 0, 0, 0, 0, diff2b$simultaneous_test))
+```
+
+
+```{r diff2c1}
+L2c1 <- matrix(c(1, 1, 0, 0), ncol = 4, byrow = TRUE)
+diff2c1 <- wcls_glh(fit2c, L2c1)
+
+resdiff2c1 <- data.frame(name = c("beta1 + beta2"),
+                   Estimate = diff2c1$summary$Estimate, 
+                   Sd = diff2c1$summary$`Std. Error`, 
+                   diff2c1$conf_int, 
+                   p_val = diff2c1$summary$`Pr(>|t|)`)
+colnames(resdiff2c1) <- c("name", "Estimate", "Sd", "2.5 %", "97.5 %", "p_val")
+```
+
+```{r diff2c2}
+L2c2 <- matrix(c(0, 0, 1, 1), ncol = 4, byrow = TRUE)
+diff2c2 <- wcls_glh(fit2c, L2c2)
+
+resdiff2c2 <- data.frame(name = c("beta3 + beta4"),
+                   Estimate = diff2c2$summary$Estimate, 
+                   sd = diff2c2$summary$`Std. Error`, 
+                   diff2c2$conf_int, 
+                   p_val = diff2c2$summary$`Pr(>|t|)`)
+colnames(resdiff2c2) <- c("name", "Estimate", "Sd", "2.5 %", "97.5 %", "p_val")
+```
+
+```{r diff2c3}
+L2c3 <- matrix(c(1, 1, -1, -1), ncol = 4, byrow = TRUE)
+diff2c3 <- wcls_glh(fit2c, L2c3)
+
+resdiff2c3 <- data.frame(name = c("beta1 + beta2 - beta3 + beta4"),
+                   Estimate = diff2c3$summary$Estimate, 
+                   Sd = diff2c3$summary$`Std. Error`, 
+                   diff2c3$conf_int, 
+                   p_val = diff2c3$summary$`Pr(>|t|)`)
+colnames(resdiff2c3) <- c("name", "Estimate", "Sd", "2.5 %", "97.5 %", "p_val")
+```
+
+```{r diff2c4}
+L2c4 <- matrix(c(1, 0, -1, 0), ncol = 4, byrow = TRUE)
+diff2c4 <- wcls_glh(fit2c, L2c4)
+resdiff2c4 <- data.frame(name = c("beta1 - beta3"),
+                   Estimate = diff2c4$summary$Estimate, 
+                   Sd = diff2c4$summary$`Std. Error`, 
+                   diff2c4$conf_int, 
+                   p_val = diff2c4$summary$`Pr(>|t|)`)
+colnames(resdiff2c4) <- c("name", "Estimate", "Sd", "2.5 %", "97.5 %", "p_val")
+```
+
+```{r diff2c}
+intercept_2c <- cbind(name = c("beta1", "beta3"), res2c)
+
+# interpretable coeff of fit 2c
+result2c <- rbind(intercept_2c, resdiff2c1,  resdiff2c2)
+
+# between trt effect of fit 2c
+resdiff2c <- rbind(resdiff2c3, resdiff2c4)
+```
+
+
+## Marginal model.
+
+\begin{align}
+    Y_t = \beta_1 (Intercept : trt = 1) + \beta_2 (Intercept : trt = 2) + g_t^T\alpha + \epsilon_t
+\end{align}
+
+### Treatment effect
+
+Averaging over study days, delivering a walking suggestion versus providing no suggestion increased the average 30 minutes step count by `r round((exp_betahat_2a[1]-1)*100 ,2)` percent ($e^{0.192} = 1.24$,  $95\%$ CI unadjusted = `r round(exp_ci_unadj2a[1,],2)`, $95\%$ CI z adjusted = `r round(exp_ci_adj_z_2a[1,],2)`, $95\%$ CI t adjusted = `r round(exp_ci_adj_t_2a[1,],2)`). Similar to analysis in Klansja 2019, the effect of antisedentary suggestion is not significant.
+
+```{r results='asis'}
+print(
+kable(
+  res2a,
+  caption = "Intercept model no moderator",
+  digits = 3, 
+  format = 'latex'
+) %>%
+  add_header_above(c(
+    " " = 1,
+    "Effect" = 2,
+    "CI" = 2,
+    "t adjusted" = 1
+  )) %>% save_kable("table_HeartSteps_2a.tex")
+)
+```
+
+Averaging over study days, The effect between delivering walking suggestion versus antisedentary suggestions is not significant. 
+
+### Effect between Treatment
+```{r results='asis'}
+print(
+kable(
+  resdiff2a,
+  caption = "Intercept model no moderator",
+  digits = 3, 
+  format = 'latex'
+) %>%
+  add_header_above(c(
+    " " = 1,
+    "Effect" = 2,
+    "CI" = 2,
+    " " = 1
+  )) %>% kable_styling(latex_options = "hold_position") %>% save_kable("table_HeartSteps_diff2a.tex")
+)
+```
+
+## Linear time trend model. 
+\begin{align}
+      Y_t = &\beta_1 (Intercept : trt = 1) + \beta_2 (time :trt = 1) + \\
+            &\beta_3 (Intercept : trt = 2) + \beta_4 (time :trt = 2) + g_t^T\alpha + \epsilon_t
+\end{align}
+
+### Treatment Effect
+
+Delivering walking suggestion initially more than double the average 30 minutes step counts of participants with no suggestion($e^{0.729} =$ `r round(exp_betahat_2b[1],2)`, $95\%$ CI unadjusted = `r round(exp_ci_unadj2b[1,],2)`, $95\%$ CI z-adjusted = `r round(exp_ci_adj_z_2b[1,],2)`, $95\%$ CI t-adjusted = `r round(exp_ci_adj_t_2b[1,],2)`). The initial effect decreases linearly with time at 1 percent a day($e^{0.005} =$ `r round(exp_betahat_2b[2],2)`,  $95\%$ CI unadjusted = `r round(exp_ci_unadj2b[2,],2)`, $95\%$ CI z-adjusted = `r round(exp_ci_adj_z_2b[2,],2)`, $95\%$ CI t-adjusted = `r round(exp_ci_adj_t_2b[2,],2)`). The initial effect and time trend for antisedentary suggestions was insignificant. 
+
+
+```{r results='asis'}
+print(
+kable(
+  res2b,
+  caption = "decision point as moderator",
+  digits = 3,
+  format = 'latex'
+) %>%
+  add_header_above(c(
+    " " = 1,
+    "Effect" = 2,
+    "CI" = 2,
+    " " = 1
+  ))%>% kable_styling(latex_options = "hold_position") %>% save_kable("table_HeartSteps_2b.tex")
+)
+```
+
+### Effect between treatment
+
+```{r results='asis'}
+print(
+kable(
+  resdiff2b,
+  caption = "time moderator",
+  digits = 4, 
+  format = 'latex'
+) %>%
+  add_header_above(c(
+    " " = 1,
+    "Effect" = 2,
+    "CI" = 2,
+    " " = 1
+  )) %>% kable_styling(latex_options = "hold_position") %>% save_kable("table_HeartSteps_diff2b.tex")
+)
+
+exp_diff_betahat_2b <- exp(diff_2b)
+exp_diff_ci_unadj2b <- exp(conf_int_diff2b)
+exp_diff_ci_adj_z_2b <- exp(conf_int_adjusted_z_diff2b)
+exp_diff_ci_adj_t_2b <- exp(conf_int_adjusted_t_diff2b)
+
+```
+
+Delivering walking suggestion versus delivering antisedentary suggestion initially increases the  average 30 minutes step count by 64%($e^{0.49} = 1.64$, $95\%$ CI unadjusted = `r round(exp_diff_ci_unadj2b[1,],2)`, $95\%$ CI z-adjusted = `r round(exp_diff_ci_adj_z_2b[1,],2)`, $95\%$ CI t-adjusted = `r round(exp_diff_ci_adj_t_2b[1,],2)`). The time trend for the two treatment was insignificant.  
+
+## Location 
+
+\begin{align}
+    Y_t = &\beta_1 (Intercept : trt = 1) + \beta_2 (loc : trt = 1) + \\
+      &\beta_3 (Intercept : trt = 2) + \beta_4 (loc : trt = 2) + g_t^T\alpha + \epsilon_t
+\end{align}
+
+### Treatment Effect
+
+```{r results='asis'}
+print(
+kable(
+  result2c,
+  caption = "home and work as moderator",
+  digits = 3, 
+  format = 'latex'
+) %>%
+  add_header_above(c(
+    " " = 2,
+    "Effect" = 2,
+    "CI" = 2,
+    " " = 1
+  ))%>% kable_styling(latex_options = "hold_position") %>% save_kable("table_HeartSteps_2c.tex")
+)
+```
+
+```{r results='asis'}
+exp_diff_betahat_2c1 <- exp(diff_2c1)
+exp_diff_ci_unadj2c1 <- exp(conf_int_diff2c1)
+exp_diff_ci_adj_z_2c1 <- exp(conf_int_adjusted_z_diff2c1)
+exp_diff_ci_adj_t_2c1 <- exp(conf_int_adjusted_t_diff2c1)
+```
+
+Delivering a walking suggestion versus providing no suggestion at home or office($\beta_1 + \beta_2$) increases the average 30 minute step count by 51%($e^{0.41} = 1.51$, $95\%$ CI unadjusted = `r round(exp_diff_ci_unadj2c1[1,],2)`, $95\%$ CI z-adjusted = `r round(exp_diff_ci_adj_z_2c1[1,],2)`, $95\%$ CI t-adjusted = `r round(exp_diff_ci_adj_t_2c1[1,],2)`). The effect of delivering an antisedentary suggestions was insignificant.  
+
+### Effect between treatment
+
+```{r results='asis'}
+print(
+kable(
+  resdiff2c,
+  caption = "Location moderator",
+  digits = 3, 
+  format = 'latex'
+) %>%
+  add_header_above(c(
+    " " = 1,
+    "Effect" = 2,
+    "CI" = 2,
+    " " = 1
+  )) %>% kable_styling(latex_options = "hold_position") %>% save_kable("table_HeartSteps_diff2c.tex")
+)
+
+exp_diff_betahat_2c <- exp(diff_2c)
+exp_diff_ci_unadj2c <- exp(conf_int_diff2c)
+exp_diff_ci_adj_z_2c <- exp(conf_int_adjusted_z_diff2c)
+exp_diff_ci_adj_t_2c <- exp(conf_int_adjusted_t_diff2c)
+```
+
+Delivering a walking suggestion versus delivering antisedentary suggestion at home or office($\beta_1 + \beta_2$) increases the average 30 minute step count by 59% ($e^{0.463} = 1.59$, $95\%$ CI unadjusted = `r round(exp_diff_ci_unadj2c[1,],2)`, $95\%$ CI z-adjusted = `r round(exp_diff_ci_adj_z_2c[1,],2)`, $95\%$ CI t-adjusted = `r round(exp_diff_ci_adj_t_2c[1,],2)`).   
+
+```{r}
+var(dta$log.jbsteps30)
+unique(dta$user.index)
+dta %>% filter(decision.index.nogap.new ==0) %>% dplyr::select(user.index)
+```
+

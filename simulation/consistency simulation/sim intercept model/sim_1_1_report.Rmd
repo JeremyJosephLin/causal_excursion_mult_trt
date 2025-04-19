@@ -1,0 +1,620 @@
+---
+title: "Simulation 1_1"
+author: "Jeremy J Lin"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document :
+    keep_tex: true
+    extra_dependencies: "subfig"
+header-includes:
+ - \usepackage{booktabs}
+ - \usepackage{longtable}
+ - \usepackage{array}
+ - \usepackage{multirow}
+ - \usepackage{wrapfig}
+ - \usepackage{float}
+ - \usepackage{subfig}
+ - \floatplacement{figure}{H}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(nlme)
+library(Matrix)
+library(MASS)
+library(rootSolve)
+library(geepack)
+library(lme4)
+library(mvtnorm)
+library(reshape2)
+library(knitr)
+library(ggplot2)
+library(tidyr)
+library(gridExtra)
+library(tidyverse)
+library(dplyr)
+library(kableExtra)
+library(corrplot)
+library(robustHD)
+library(pracma)
+library(xtable)
+library(latex2exp)
+library(janitor)
+library(ggpubr)
+# parallel computing libraries
+library(foreach)
+#library(doMC)
+# beep beep 
+library(beepr)
+library(doParallel)
+library(doSNOW)
+library(utils)
+library(foreach)
+library(doRNG)
+library(geepack)
+```
+
+```{r echo=FALSE}
+#rm(list = ls())
+
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, 
+                      warning = FALSE, results = "hide", 
+                      fig.pos = 'H', cache = FALSE, 
+                      eval = TRUE)
+```
+
+<!-- Functions -->
+
+
+# Simulation Settings 
+
+Consistency simulation for Estimator performed over 1000 rep simulation. 
+
+
+Data generative model : 
+
+\begin{align*}
+  Y_{it, 1} | H_t, A_t &= I_{(A_{it} = 1)}(\beta_1  + \beta_2 Z_{it})+ I_{(A_{i,t} = 2)}(\beta_3 + \beta_4 Z_{it}) + (0.2 I_{Z_{it} = 0} + 0.5 I_{Z_{it} = 1} + 0.4 I_{Z_{it} = 2})+ \epsilon_{i,t}\\
+  \beta_1 &= 0.1 \text{ (Intercept of treatment 1)}\\
+  \beta_2 &= 0.3 \text{ (slope of treatment 1)}\\
+  \beta_3 &= 0.2 \text{ (Intercept of treatment 2)}\\
+  \beta_4 &= 0.1 \text{ (slope of treatment 2)}
+\end{align*}
+
+\begin{align*}
+  I_t &\sim Bern (1)\\
+  A_{i,t} &= \{0, 1, 2\}\\
+  P(A_{it} = 0 |H_t) &=\tilde{p_0}  = 0.2\\
+  P(A_{it} = 1 |H_t) &=\tilde{p_1}  = 0.5\\
+  P(A_{it} = 2 |H_t) &=\tilde{p_2}  = 0.3\\
+\end{align*}
+
+
+# Parameter
+```{r eval = TRUE}
+alpha <- c(1, 1) # no treatment
+mean_var <- 1
+L <- matrix(cbind(diag(1, nrow = 2), - diag(1, nrow = 2)), nrow = 2) #Contrast Matrix
+gamma <- 0.05 #type 1 error
+b = 0.2 #type 2 error
+prob_a <- c(0.2, 0.5, 0.3)
+
+```
+
+```{r eval=TRUE}
+result_list <-
+  readRDS("sim.rds")
+```
+
+
+```{r}
+na_vec <- rep(NA, length(result_list))
+param <- c(0.1, 0.3, 0.45, 0.1)
+
+coef_est <- data.frame(
+  sample_size = na_vec,
+  total_T = na_vec,
+  bias_beta_1 = na_vec,
+  bias_beta_2 = na_vec,
+  bias_beta_3 = na_vec,
+  bias_beta_4 = na_vec,
+  th_se_beta_1 = na_vec,
+  th_se_beta_2 = na_vec,
+  th_se_beta_3 = na_vec,
+  th_se_beta_4 = na_vec,
+  beta_1_se = na_vec,
+  beta_2_se = na_vec,
+  beta_3_se = na_vec,
+  beta_4_se = na_vec,
+  beta_1_cp = na_vec,
+  beta_2_cp = na_vec,
+  beta_3_cp = na_vec,
+  beta_4_cp = na_vec,
+  beta_1_rmse = na_vec,
+  beta_2_rmse = na_vec,
+  beta_3_rmse = na_vec,
+  beta_4_rmse = na_vec,
+  th_se_beta_1_adj = na_vec,
+  th_se_beta_2_adj = na_vec,
+  th_se_beta_3_adj = na_vec,
+  th_se_beta_4_Adj = na_vec,
+  beta_1_cp_adj_z = na_vec,
+  beta_2_cp_adj_z = na_vec,
+  beta_3_cp_adj_z = na_vec,
+  beta_4_cp_adj_z = na_vec,
+  beta_1_cp_adj_t = na_vec,
+  beta_2_cp_adj_t = na_vec,
+  beta_3_cp_adj_t = na_vec,
+  beta_4_cp_adj_t = na_vec,
+  beta_1_ci_lb_unadj = na_vec,
+  beta_2_ci_lb_unadj = na_vec,
+  beta_3_ci_lb_unadj = na_vec,
+  beta_4_ci_lb_unadj = na_vec,
+  beta_1_ci_ub_unadj = na_vec,
+  beta_2_ci_ub_unadj = na_vec,
+  beta_3_ci_ub_unadj = na_vec,
+  beta_4_ci_ub_unadj = na_vec,
+  beta_1_ci_lb_adj_z = na_vec,
+  beta_2_ci_lb_adj_z = na_vec,
+  beta_3_ci_lb_adj_z = na_vec,
+  beta_4_ci_lb_adj_z = na_vec,
+  beta_1_ci_ub_adj_z = na_vec,
+  beta_2_ci_ub_adj_z = na_vec,
+  beta_3_ci_ub_adj_z = na_vec,
+  beta_4_ci_ub_adj_z = na_vec,
+  beta_1_ci_lb_adj_t = na_vec,
+  beta_2_ci_lb_adj_t = na_vec,
+  beta_3_ci_lb_adj_t = na_vec,
+  beta_4_ci_lb_adj_t = na_vec,
+  beta_1_ci_ub_adj_t = na_vec,
+  beta_2_ci_ub_adj_t = na_vec,
+  beta_3_ci_ub_adj_t = na_vec,
+  beta_4_ci_ub_adj_t = na_vec
+)
+j = 1
+
+for(j in 1:length(result_list)) {
+  n <- coef_est$sample_size[j]<- result_list[[j]]$sample_size
+  t <- coef_est$total_T[j] <- result_list[[j]]$total_T
+  # Calculate power
+  data <- result_list[[j]]
+
+  # Store the coefficient from lme for all simulation
+  # row = coef, col = simulation
+  coef_method <- sapply(result_list[[j]]$result, function(l) l$beta_hat)
+  th_se <- sapply(result_list[[j]]$result, function(l) l$beta_se)
+  th_se_adj <- sapply(result_list[[j]]$result, function(l) l$beta_se_adjusted)
+  ci_unadj_lb <- sapply(result_list[[j]]$result, function(l) l$ci_unadj[,1])
+  ci_unadj_ub <- sapply(result_list[[j]]$result, function(l) l$ci_unadj[,2])
+  ci_adj_lb_z <- sapply(result_list[[j]]$result, function(l) l$ci_adj_z[,1])
+  ci_adj_ub_z <- sapply(result_list[[j]]$result, function(l) l$ci_adj_z[,2])
+  ci_adj_lb_t <- sapply(result_list[[j]]$result, function(l) l$ci_adj_t[,1])
+  ci_adj_ub_t <- sapply(result_list[[j]]$result, function(l) l$ci_adj_t[,2])
+  
+  # Average of all betas (simulation  - true coef),
+  coef_est[j, 3:6] <- rowMeans(coef_method) - param
+  coef_est[j, 7:10] <- rowMeans(th_se)
+  coef_est[j, 11:14] <- apply(coef_method, 1, sd)
+  coef_est[j, 23:26] <- rowMeans(th_se_adj)
+
+  # see if it's inside the confidence interval
+  # see the binary yes or no cp
+  # unadj cp
+  coef_est[j, 15:18] <-
+    sapply(1:4, function(i)
+      mean(
+        (param[i] >= ci_unadj_lb[i,] ) &
+          (param[i] <= ci_unadj_ub[i,])
+      ))
+  
+  coef_est[j, 59:62] <-
+    sapply(1:2, function(i)
+      mean(
+        (param[i] >= coef_method[i,] - 1.96 * th_se[i,]) &
+          (param[i] <= coef_method[i,] + 1.96 * th_se[i,])
+      ))
+  
+  # adj cp with z 
+  coef_est[j, 27:30] <-
+    sapply(1:4, function(i)
+      mean(
+        (param[i] >= ci_adj_lb_z[i,]) &
+          (param[i] <= ci_adj_ub_z[i,])
+      ))
+  
+  # adj cp with t
+  coef_est[j, 31:34] <-
+    sapply(1:4, function(i)
+      mean(
+        (param[i] >= ci_adj_lb_t[i,]) &
+          (param[i] <= ci_adj_ub_t[i,])
+      ))
+  
+  # mse = bias^2 + variance unadj
+  coef_est[j, 19:22] <- sqrt((coef_est[j,3:6]) ^ 2 + (coef_est[j, 11:14]) ^ 2)
+  
+  # ci undajust lowerbound and upperbound
+  coef_est[j, 35:38] <- rowMeans(ci_unadj_lb)
+  coef_est[j, 39:42] <- rowMeans(ci_unadj_ub)
+  
+  # ci z-adjusted lowerbound and upperbound
+  coef_est[j, 43:46] <- rowMeans(ci_adj_lb_z)
+  coef_est[j, 47:50] <- rowMeans(ci_adj_ub_z)
+  
+  # ci t-adjusted lowerbound and upperbound
+  coef_est[j, 51:54] <- rowMeans(ci_adj_lb_t)
+  coef_est[j, 55:58] <- rowMeans(ci_adj_ub_t)
+  
+  # These following lines are to debug the ci from df, commented since they are identical witn unadj cp
+  # # ci unaddjusted manually calculated lowerbound and upperbound
+  # coef_est[j, 63:66] <- rowMeans(coef_method - 1.96 * th_se)
+  # coef_est[j, 67:70] <- rowMeans(coef_method + 1.96 * th_se)
+}
+```
+
+
+```{r}
+beta_1_ci <- coef_est %>% dplyr::select(sample_size, beta_1_ci_lb_unadj, beta_1_ci_ub_unadj,beta_1_ci_lb_adj_z, beta_1_ci_ub_adj_z, beta_1_ci_lb_adj_t, beta_1_ci_ub_adj_t )
+
+beta_2_ci <- coef_est %>% dplyr::select(sample_size, beta_2_ci_lb_unadj, beta_2_ci_ub_unadj,beta_2_ci_lb_adj_z, beta_2_ci_ub_adj_z, beta_2_ci_lb_adj_t, beta_2_ci_ub_adj_t )
+
+beta_3_ci <- coef_est %>% dplyr::select(sample_size, beta_3_ci_lb_unadj, beta_3_ci_ub_unadj,beta_3_ci_lb_adj_z, beta_3_ci_ub_adj_z, beta_3_ci_lb_adj_t, beta_3_ci_ub_adj_t )
+
+beta_4_ci <- coef_est %>% dplyr::select(sample_size,beta_4_ci_lb_unadj, beta_4_ci_ub_unadj,beta_4_ci_lb_adj_z, beta_4_ci_ub_adj_z, beta_4_ci_lb_adj_t, beta_4_ci_ub_adj_t )
+```
+
+
+
+
+```{r}
+beta_1_table <- coef_est %>% dplyr::select(sample_size, ends_with("beta_1"), starts_with("beta_1"))
+beta_2_table <- coef_est %>% dplyr::select(sample_size, ends_with("beta_2"), starts_with("beta_2"))
+beta_3_table <- coef_est %>% dplyr::select(sample_size, ends_with("beta_3"), starts_with("beta_3"))
+beta_4_table <- coef_est %>% dplyr::select(sample_size, ends_with("beta_4"), starts_with("beta_4"))
+```
+
+
+```{r}
+bias_dta <- tibble(n = beta_1_table$sample_size,
+                   beta_1 = beta_1_table$bias_beta_1, 
+                   beta_2 = beta_2_table$bias_beta_2,
+                   beta_3 = beta_3_table$bias_beta_3,
+                   beta_4 = beta_4_table$bias_beta_4)
+bias_dta_long <- bias_dta %>% pivot_longer(!n, names_to = "coef", values_to = "bias") %>% mutate(trt = rep(c(1, 1, 2, 2), 6))
+```
+
+
+```{r}
+rmse_dta <- tibble(n = beta_1_table$sample_size,
+                   beta_1 = beta_1_table$beta_1_rmse, 
+                   beta_2 = beta_2_table$beta_2_rmse,
+                   beta_3 = beta_3_table$beta_3_rmse,
+                   beta_4 = beta_4_table$beta_4_rmse)
+rmse_dta_long <- rmse_dta %>% pivot_longer(!n, names_to = "coef", values_to = "rmse") %>% mutate(trt = rep(c(1, 1, 2, 2), 6))
+```
+
+```{r}
+cp_dta <- tibble(n = beta_1_table$sample_size,
+                   beta_1 = beta_1_table$beta_1_cp_adj_t, 
+                   beta_2 = beta_2_table$beta_2_cp_adj_t,
+                   beta_3 = beta_3_table$beta_3_cp_adj_t,
+                   beta_4 = beta_4_table$beta_4_cp_adj_t)
+cp_dta_long <- cp_dta %>% pivot_longer(!n, names_to = "coef", values_to = "cp") %>% mutate(trt = rep(c(1, 1, 2, 2), 6))
+```
+
+```{r}
+# change font size, legend position
+myggfont <- function(legend_pos = NULL,
+                     legend_text_size = 22,
+                     legend_title_size = 22,
+                     axis_text_size = 22,
+                     axis_title_size = 24,
+                     plot_title_size = 22,
+                     facet_text_size = 18) {
+  ff <- theme(legend.text = element_text(size = legend_text_size),
+              legend.title = element_text(size = legend_title_size),
+              axis.text = element_text(size = axis_text_size),
+              axis.title = element_text(size = axis_title_size, face="bold"),
+              plot.title = element_text(size = plot_title_size),
+              strip.text.x = element_text(size = facet_text_size),
+              strip.text.y = element_text(size = facet_text_size))
+  if (is.null(legend_pos)) {
+    return(ff)
+  } else if (legend_pos == "top-left") {
+    return(ff + theme(legend.justification = c(0,1), legend.position = c(0,1)))
+  } else if (legend_pos == "top-right") {
+    return(ff + theme(legend.justification = c(1,1), legend.position = c(1,1)))
+  } else if (legend_pos == "bottom-left") {
+    return(ff + theme(legend.justification = c(0,0), legend.position = c(0,0)))
+  } else if (legend_pos == "bottom-right") {
+    return(ff + theme(legend.justification = c(1,0), legend.position = c(1,0)))
+  } else {
+    stop("legend_pos needs to be NULL, top-left, top-right, bottom-left, or bottom-right.")
+  }
+}
+```
+
+```{r}
+# create plot 
+    p1 <- bias_dta_long %>% 
+    ggplot(aes(x = n, y = bias, linetype = factor(trt),
+               color = factor(coef))) +
+    geom_line(size = 2) +
+    geom_hline(yintercept = 0, linetype = 2) +
+    scale_color_discrete(name = TeX(r'(Coefficient)'),
+                            labels = c(TeX(r'($beta_1$)'),
+                                       TeX(r'($beta_2$)'),
+                                       TeX(r'($beta_3$)'),
+                                      TeX(r'($beta_4$)'))) +
+    scale_linetype_discrete(name = TeX(r'(trt)'),
+                         labels = c(TeX(r'($A_t = 1$)'),
+                                    TeX(r'($A_t = 2$)'))) +
+    # scale_color_discrete(name = TeX(r'($ATE^* = ATE^w$, $ASPN^* = ASPN^w$)'),
+    #                      labels = c(TeX(r'($ATE = 1.2$, $ASPN = 0.2$)'),
+    #                                 TeX(r'($ATE = 1.2$, $ASPN = 0.3$)'),
+    #                                 TeX(r'($ATE = 1.2$, $ASPN = 0.4$)'),
+    #                                 TeX(r'($ATE = 1.3$, $ASPN = 0.2$)'),
+    #                                 TeX(r'($ATE = 1.3$, $ASPN = 0.3$)'),
+    #                                 TeX(r'($ATE = 1.3$, $ASPN = 0.4$)'))) +
+    xlab(TeX(r'($n$)')) +
+    ylab("bias") +
+    #ggtitle(TeX(r'(bias versus $n$)')) +
+    coord_cartesian(ylim = c(-0.03, 0.03)) +
+    scale_y_continuous(breaks = seq(from = -0.03, to = 0.03, by = 0.01)) +
+    scale_x_continuous(breaks = seq(from = 15, to = 50, by = 5)) +
+    theme_bw() + 
+    myggfont() +
+    theme(legend.position="none")+
+    theme(legend.text.align = 0, plot.title = element_text(hjust = 0.5))
+p1
+
+ggsave(paste0("bias_plot_linear_time.pdf"), width = 5.5, height = 5.5)
+```
+```{r}
+# create plot 
+    p2 <- rmse_dta_long %>% 
+    ggplot(aes(x = n, y = rmse, linetype = factor(trt),
+               color = factor(coef))) +
+    geom_line(size = 2) +
+    geom_hline(yintercept = 0, linetype = 2) +
+    scale_color_discrete(name = TeX(r'(Coefficient)'),
+                            labels = c(TeX(r'($beta_1$)'),
+                                       TeX(r'($beta_2$)'),
+                                       TeX(r'($beta_3$)'),
+                                      TeX(r'($beta_4$)'))) +
+    scale_linetype_discrete(name = TeX(r'(trt)'),
+                         labels = c(TeX(r'($A_t = 1$)'),
+                                    TeX(r'($A_t = 2$)'))) +
+    # scale_color_discrete(name = TeX(r'($ATE^* = ATE^w$, $ASPN^* = ASPN^w$)'),
+    #                      labels = c(TeX(r'($ATE = 1.2$, $ASPN = 0.2$)'),
+    #                                 TeX(r'($ATE = 1.2$, $ASPN = 0.3$)'),
+    #                                 TeX(r'($ATE = 1.2$, $ASPN = 0.4$)'),
+    #                                 TeX(r'($ATE = 1.3$, $ASPN = 0.2$)'),
+    #                                 TeX(r'($ATE = 1.3$, $ASPN = 0.3$)'),
+    #                                 TeX(r'($ATE = 1.3$, $ASPN = 0.4$)'))) +
+    xlab(TeX(r'($n$)')) +
+    ylab("RMSE") +
+    #ggtitle(TeX(r'(RMSE versus $n$)')) +
+    coord_cartesian(ylim = c(0.1, 0.4)) +
+    scale_y_continuous(breaks = seq(from = 0.1, to = 1, by = 0.1)) +
+    scale_x_continuous(breaks = seq(from = 15, to = 50, by = 5)) +
+    theme_bw() + 
+    myggfont() +
+    theme(legend.position="none")+
+    theme(legend.text.align = 0, plot.title = element_text(hjust = 0.5))
+p2
+
+ggsave(paste0("rmse_plot_linear_time.pdf"), width = 5.5, height = 5.5)
+```
+
+```{r}
+# create plot 
+    p3 <- cp_dta_long %>% 
+    ggplot(aes(x = n, y = cp, linetype = factor(trt),
+               color = factor(coef))) +
+    geom_line(size = 2) +
+    geom_hline(yintercept = 0.95, linetype = 2) +
+    scale_color_discrete(name = TeX(r'(Coefficient)'),
+                            labels = c(TeX(r'($beta_1$)'),
+                                       TeX(r'($beta_2$)'),
+                                       TeX(r'($beta_3$)'),
+                                      TeX(r'($beta_4$)'))) +
+    scale_linetype_discrete(name = TeX(r'(trt)'),
+                         labels = c(TeX(r'($A_t = 1$)'),
+                                    TeX(r'($A_t = 2$)'))) +
+    # scale_color_discrete(name = TeX(r'($ATE^* = ATE^w$, $ASPN^* = ASPN^w$)'),
+    #                      labels = c(TeX(r'($ATE = 1.2$, $ASPN = 0.2$)'),
+    #                                 TeX(r'($ATE = 1.2$, $ASPN = 0.3$)'),
+    #                                 TeX(r'($ATE = 1.2$, $ASPN = 0.4$)'),
+    #                                 TeX(r'($ATE = 1.3$, $ASPN = 0.2$)'),
+    #                                 TeX(r'($ATE = 1.3$, $ASPN = 0.3$)'),
+    #                                 TeX(r'($ATE = 1.3$, $ASPN = 0.4$)'))) +
+    xlab(TeX(r'($n$)')) +
+    ylab("Coverage Probability") +
+    #ggtitle(TeX(r'(Coverage Probability versus $n$)')) +
+    #coord_cartesian(ylim = c(0.9, 1.0)) +
+    scale_y_continuous(breaks = seq(from = 0.9, to = 1, by = 0.01)) +
+    scale_x_continuous(breaks = seq(from = 15, to = 50, by = 5)) +
+    theme_bw() + 
+    myggfont() + 
+    theme(legend.text.align = 0, plot.title = element_text(hjust = 0.5))
+p3
+
+ggsave(paste0("cp_plot_linear_time.pdf"), width = 6.5, height = 5.5)
+```
+
+```{r}
+intercept_1 <- tibble(
+  Bias = coef_est$bias_beta_1,
+  RMSE = coef_est$beta_1_rmse,
+  SD = coef_est$beta_1_se,
+  # CP = coef_est$beta_1_cp,
+  # CP_adj_z = coef_est$beta_1_cp_adj_z, 
+  CP_adj_t = coef_est$beta_1_cp_adj_t
+)
+
+slope_1 <- tibble(
+  Bias = coef_est$bias_beta_2,
+  RMSE = coef_est$beta_2_rmse,
+  SD = coef_est$beta_2_se,
+  # CP = coef_est$beta_2_cp,
+  # CP_adj_z = coef_est$beta_2_cp_adj_z, 
+  CP_adj_t = coef_est$beta_2_cp_adj_t,
+)
+
+intercept_2 <- tibble(
+  Bias = coef_est$bias_beta_3,
+  RMSE = coef_est$beta_3_rmse,
+  SD = coef_est$beta_3_se,
+  # CP = coef_est$beta_3_cp,
+  # CP_adj_z = coef_est$beta_3_cp_adj_z, 
+  CP_adj_t = coef_est$beta_3_cp_adj_t,
+)
+slope_2 <- tibble(
+  Bias = coef_est$bias_beta_4,
+  RMSE = coef_est$beta_4_rmse,
+  SD = coef_est$beta_4_se,
+  # CP = coef_est$beta_4_cp,
+  # CP_adj_z = coef_est$beta_4_cp_adj_z, 
+  CP_adj_t = coef_est$beta_1_cp_adj_t,
+)
+
+
+```
+
+```{r}
+intercept_1
+```
+
+
+```{r}
+trt_1_tibble <- bind_cols(intercept_1, slope_1) %>%
+  mutate(Treatment = 1, sample_size = coef_est$sample_size) %>%
+  dplyr::select(Treatment, sample_size, everything())
+trt_2_tibble <- bind_cols(intercept_2, slope_2) %>%
+  mutate(Treatment = 2, sample_size = coef_est$sample_size) %>%
+  dplyr::select(Treatment, sample_size, everything())
+
+estimator <- bind_rows(trt_1_tibble, trt_2_tibble)
+
+result <- estimator %>%
+  group_by(Treatment) %>%
+  ungroup %>%
+  mutate(Treatment = replace(Treatment, duplicated(Treatment), ''))
+
+result
+```
+
+```{r results='asis', eval= TRUE}
+print(
+kable(
+  result,
+  format = "latex",
+  booktabs = TRUE,
+  caption = "Performance of MEE",
+  col.names = c("Trt", "Sample size", rep(c("Bias", "RMSE","SD", "CP(t-adj)" ),2)),
+  escape = FALSE,
+  digits = 3
+) %>%
+  kable_styling(latex_options = c("HOLD_position", "scale_down"),
+                full_width = T) %>%
+  add_header_above(c(
+    " " = 2,
+    "Intercept" = 4,
+    "Slope" = 4
+  )) %>%
+  #row_spec(3, extra_latex_after = "\\cline{1-12}") %>%
+  save_kable("result_table.tex", float = FALSE)
+
+)
+```
+
+
+```{r results='asis', eval= TRUE}
+print(
+kable(
+  beta_1_ci,
+  format = "latex",
+  booktabs = TRUE,
+  caption = "$\\beta_1$ Confidence Interval with different adjustment",
+  col.names = c("Sample size", rep(c("lower ci", "upper ci" ),3)),
+  escape = FALSE,
+  digits = 3
+) %>%
+  kable_styling(latex_options = c("HOLD_position", "scale_down"),
+                full_width = T) %>%
+  add_header_above(c(
+    " " = 1,
+    "unadjusted" = 2,
+    "adjusted with z dist" = 2,
+    "adjusted with t dist" = 2
+  ))
+)
+```
+
+```{r results='asis', eval= TRUE}
+print(
+kable(
+  beta_2_ci,
+  format = "latex",
+  booktabs = TRUE,
+  caption = "$\\beta_2$ Confidence Interval with different adjustment",
+  col.names = c("Sample size", rep(c("lower ci", "upper ci" ),3)),
+  escape = FALSE,
+  digits = 3
+) %>%
+  kable_styling(latex_options = c("HOLD_position", "scale_down"),
+                full_width = T) %>%
+  add_header_above(c(
+    " " = 1,
+    "unadjusted" = 2,
+    "adjusted with z dist" = 2,
+    "adjusted with t dist" = 2
+  ))
+)
+```
+
+```{r results='asis', eval= TRUE}
+print(
+kable(
+  beta_3_ci,
+  format = "latex",
+  booktabs = TRUE,
+  caption = "$\\beta_3$ Confidence Interval with different adjustment",
+  col.names = c("Sample size", rep(c("lower ci", "upper ci" ),3)),
+  escape = FALSE,
+  digits = 3
+) %>%
+  kable_styling(latex_options = c("HOLD_position", "scale_down"),
+                full_width = T) %>%
+  add_header_above(c(
+    " " = 1,
+    "unadjusted" = 2,
+    "adjusted with z dist" = 2,
+    "adjusted with t dist" = 2
+  ))
+)
+```
+
+```{r results='asis', eval= TRUE}
+print(
+kable(
+  beta_4_ci,
+  format = "latex",
+  booktabs = TRUE,
+  caption = "$\\beta_4$ Confidence Interval with different adjustment",
+  col.names = c("Sample size", rep(c("lower ci", "upper ci" ),3)),
+  escape = FALSE,
+  digits = 3
+) %>%
+  kable_styling(latex_options = c("HOLD_position", "scale_down"),
+                full_width = T) %>%
+  add_header_above(c(
+    " " = 1,
+    "unadjusted" = 2,
+    "adjusted with z dist" = 2,
+    "adjusted with t dist" = 2
+  ))
+)
+```

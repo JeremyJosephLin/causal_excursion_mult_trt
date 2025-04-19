@@ -1,0 +1,630 @@
+---
+title: "DrinkLess Data Analysis"
+author: "Jeremy Lin"
+date: "2024-04-18"
+output: 
+  pdf_document :
+    keep_tex: true
+    extra_dependencies: "subfig"
+header-includes:
+ - \usepackage{booktabs}
+ - \usepackage{longtable}
+ - \usepackage{array}
+ - \usepackage{multirow}
+ - \usepackage{wrapfig}
+ - \usepackage{float}
+ - \usepackage{subfig}
+ - \floatplacement{figure}{H}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(nlme)
+library(Matrix)
+library(MASS)
+library(rootSolve)
+library(geepack)
+library(lme4)
+library(mvtnorm)
+library(reshape2)
+library(knitr)
+library(ggplot2)
+library(tidyr)
+library(gridExtra)
+library(tidyverse)
+library(dplyr)
+library(kableExtra)
+library(corrplot)
+library(robustHD)
+library(pracma)
+library(xtable)
+library(latex2exp)
+library(janitor)
+library(ggpubr)
+library(lubridate)
+# parallel computing libraries
+library(foreach)
+#library(doMC)
+# beep beep 
+library(beepr)
+library(doParallel)
+library(doSNOW)
+library(utils)
+library(foreach)
+library(doRNG)
+library(geepack)
+```
+
+```{r echo=FALSE}
+#rm(list = ls())
+
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, 
+                      warning = FALSE, results = "hide", 
+                      fig.pos = 'H', cache = FALSE, 
+                      eval = TRUE)
+# load functions
+source("~/Documents/Research/causal_excursion_mult_trt/R code/functions_util.R")
+
+# load data set 
+dta <- readRDS("DrinkLess_data_primary_analysis.RDS")
+```
+
+
+```{r}
+# EDA 
+# there is no missing data in this dataset
+summary(dta)
+
+# n_sample = 349  participants (paper said 42 so 5 drop during the study?)
+n_sample = length(unique(dta$ID))
+id <- unique(dta$ID)
+
+# create table for participant versus timepoints 
+na_vec <- rep(NA, n_sample)
+id_tbl <- data.frame(
+  id = na_vec,
+  n_timepoints = na_vec,
+  max_time = na_vec ,
+  time_complete = na_vec
+)
+
+for (i in 1:n_sample) {
+  id_tbl$id[i] <- id[i]
+  time_i <- dta[which(dta$ID == id[i]), "decision_index"]
+  id_tbl$n_timepoints[i] <- dim(time_i)[1] 
+  id_tbl$max_time[i] <- max(time_i$decision_index)
+  id_tbl$time_complete[i] <- id_tbl$n_timepoints[i] == (id_tbl$max_time[i])
+}
+
+id_tbl
+
+# all participants have full timpepoints
+which(id_tbl$time_complete == FALSE)
+
+
+```
+
+```{r}
+# data transformation
+# create lag variable
+dta$seconds_8to9.lag  <- c(0,head(dta$seconds_8to9,-1))
+
+# attach availability column for estimator purposes (set I =1 for all time point)
+dta$I <- 1
+
+# add probability treatment (required in our estimator)
+dta$prob_A <- sapply(dta$treatment_cate, function(l) ifelse(l == 0, 0.4, 
+                                    ifelse(l == 1, 0.3, 0.3)) )
+
+dta <- dta %>% mutate(AUDIT_hazardous = ifelse(AUDIT_score >= 8 & AUDIT_score <= 15, 1, 0))
+dta <- dta %>% mutate(AUDIT_harmful = ifelse(AUDIT_score >= 16 & AUDIT_score <= 19, 1, 0))
+dta <- dta %>% mutate(AUDIT_atRisk = ifelse(AUDIT_score >= 20 & AUDIT_score <= 40, 1, 0))
+
+# make it as dataframe
+dta <- as.data.frame(dta)
+
+# # save data 
+saveRDS(dta, "DrinkLess_processed.RDS")
+# saveRDS(HeartSteps_data_primary_analysis, "HeartSteps_data_primary_analysis_modified.RDS")
+# write_csv(HeartSteps_data_primary_analysis, "HeartSteps_data_primary_analysis_modified.csv")
+```
+
+
+```{r}
+# # estimate availability
+# # empirical estimate
+# # max time point 
+# time_max <- max(id_tbl$max_time)
+# It_estimate <- rep(NA, time_max)
+# for (i in 1:time_max) {
+#   It_estimate[i] <- mean(dta[which(dta$decision.index.nogap.new == i), "I"])
+# }
+# # availability is roughly around 0.8 (after time 210 is fluctuating due to not that many individual have them)
+# #It_estimate
+# 
+# #summary(dta)
+dta <- readRDS("DrinkLess_processed.RDS")
+
+var(dta$seconds_8to9)
+sum(dta$seconds_8to9 == 0) / length(dta$seconds_8to9)
+
+var_t <- rep(NA, 30)
+for (t in 1:30) {
+  var_t[t] <- dta %>% filter(decision_index == t) %>% dplyr::select(seconds_8to9) %>% unlist() %>%  var()
+}
+
+mean(var_t)
+
+plot(x = 1:30, y = var_t)
+1.56 /8517.41
+```
+
+# Analysis
+
+```{r eval=FALSE}
+# fitting our estimator 
+id_varname = c("ID")
+decision_time_varname = c("decision_index")
+treatment_varname = c("treatment_cate")
+
+avail_varname = c("I")
+rand_prob_varname = "prob_A"
+trt_level = 2
+
+moderator_varname <- c()
+outcome_varname = c("seconds_8to9")
+control_varname <- c()
+
+fit1 <- wcls_categorical_treatment(
+  dta = dta,
+  id_varname = id_varname,
+  decision_time_varname = decision_time_varname,
+  treatment_varname = treatment_varname,
+  outcome_varname = outcome_varname,
+  control_varname = control_varname,
+  moderator_varname = moderator_varname,
+  rand_prob_varname = rand_prob_varname,
+  avail_varname = avail_varname,
+  trt_level = trt_level,
+  estimator_initial_value = NULL
+)
+```
+
+
+
+```{r}
+# fitting our estimator 
+id_varname = c("ID")
+decision_time_varname = c("decision_index")
+treatment_varname = c("treatment_cate")
+
+avail_varname = c("I")
+rand_prob_varname = "prob_A"
+trt_level = 2
+
+moderator_varname <- c()
+outcome_varname = c("seconds_8to9")
+control_varname <- c("age", "AUDIT_score", "gender","decision_index", "seconds_8to9.lag")
+
+fit1a <- wcls_categorical_treatment(
+  dta = dta,
+  id_varname = id_varname,
+  decision_time_varname = decision_time_varname,
+  treatment_varname = treatment_varname,
+  outcome_varname = outcome_varname,
+  control_varname = control_varname,
+  moderator_varname = moderator_varname,
+  rand_prob_varname = rand_prob_varname,
+  avail_varname = avail_varname,
+  trt_level = trt_level,
+  estimator_initial_value = NULL
+)
+
+
+#fit1a$conf_int_adjusted_t
+
+# fit 1 b use time as moderator
+moderator_varname = c("decision_index")
+
+fit1b <- wcls_categorical_treatment(
+  dta = dta,
+  id_varname = id_varname,
+  decision_time_varname = decision_time_varname,
+  treatment_varname = treatment_varname,
+  outcome_varname = outcome_varname,
+  control_varname = control_varname,
+  moderator_varname = moderator_varname,
+  rand_prob_varname = rand_prob_varname,
+  avail_varname = avail_varname,
+  trt_level = trt_level,
+  estimator_initial_value = NULL
+)
+
+#fit1b$conf_int_adjusted_t
+
+# fit 1c use location as moderator 
+moderator_varname = c("AUDIT_score")
+
+fit1c <- wcls_categorical_treatment(
+  dta = dta,
+  id_varname = id_varname,
+  decision_time_varname = decision_time_varname,
+  treatment_varname = treatment_varname,
+  outcome_varname = outcome_varname,
+  control_varname = control_varname,
+  moderator_varname = moderator_varname,
+  rand_prob_varname = rand_prob_varname,
+  avail_varname = avail_varname,
+  trt_level = trt_level,
+  estimator_initial_value = NULL
+)
+
+#fit1c$conf_int_adjusted_t
+
+# model when using Audit as factor (using hazardous as baseline)
+moderator_varname = c("AUDIT_harmful","AUDIT_atRisk")
+control_varname <- c("age", "AUDIT_harmful","AUDIT_atRisk","gender","decision_index", "seconds_8to9.lag")
+
+fit1d <- wcls_categorical_treatment(
+  dta = dta,
+  id_varname = id_varname,
+  decision_time_varname = decision_time_varname,
+  treatment_varname = treatment_varname,
+  outcome_varname = outcome_varname,
+  control_varname = control_varname,
+  moderator_varname = moderator_varname,
+  rand_prob_varname = rand_prob_varname,
+  avail_varname = avail_varname,
+  trt_level = trt_level,
+  estimator_initial_value = NULL
+)
+
+
+```
+
+```{r}
+fit_1a_summary <- wcls_summary(fit1a)
+fit_1b_summary <- wcls_summary(fit1b)
+fit_1c_summary <- wcls_summary(fit1c)
+fit_1d_summary <- wcls_summary(fit1d)
+```
+
+
+```{r}
+res1a <- data.frame(Estimate =fit1a$beta_hat,
+           Sd = fit1a$beta_se)
+res1a <- cbind(res1a, fit1a$conf_int_adjusted_t, p_val = fit_1a_summary$`Pr(>|t|)`)
+
+res1b <- data.frame(Estimate =fit1b$beta_hat,
+           Sd = fit1b$beta_se)
+res1b <- cbind(res1b, fit1b$conf_int_adjusted_t, p_val = fit_1b_summary$`Pr(>|t|)`)
+
+res1c <- data.frame(Estimate =fit1c$beta_hat,
+           Sd = fit1c$beta_se)
+res1c <- cbind(res1c, fit1c$conf_int_adjusted_t, p_val = fit_1c_summary$`Pr(>|t|)`)
+
+res1d <- data.frame(Estimate =fit1d$beta_hat,
+           Sd = fit1d$beta_se )
+res1d <- cbind(res1d, fit1d$conf_int_adjusted_t, p_val = fit_1d_summary$`Pr(>|t|)`)
+```
+
+```{r resdif1a}
+# # between treatment marginal
+L1a <- matrix(c(1, -1), nrow = 1)
+diff1a <- wcls_glh(fit1a, L1a)
+
+resdiff1a <- cbind(name = c("beta1 - beta2"),
+                   estimator = diff1a$summary$Estimate, 
+                   sd = diff1a$summary$`Std. Error`, 
+                   diff1a$conf_int, 
+                   pval = diff1a$summary$`Pr(>|t|)`)
+```
+
+```{r resdif1b}
+L1b <- matrix(c(1, 0, -1, 0, 0, 1, 0, -1), ncol = 4, byrow = TRUE)
+diff1b <- wcls_glh(fit1b, L1b)
+
+resdiff1b <- cbind(name = c("beta1- beta3", "beta2 - beta4"),
+                   estimator = diff1b$summary$Estimate, 
+                   sd = diff1b$summary$`Std. Error`, 
+                   diff1b$conf_int, 
+                   pval = diff1b$summary$`Pr(>|t|)`)
+# simultaneous p value
+resdiff1b <- rbind(resdiff1b, c("simultaneous", 0, 0, 0, 0, diff1b$simultaneous_test))
+```
+
+```{r resdif1d1}
+L1d1 <- matrix(c(1, 1, 0, 0, 0, 0), ncol = 6, byrow = TRUE)
+
+diff1d1 <- wcls_glh(fit1d, L1d1)
+resdiff1d1 <- cbind(name = c("beta1 +beta2"),
+                    estimator = diff1d1$summary$Estimate, 
+                   sd = diff1d1$summary$`Std. Error`, 
+                   diff1d1$conf_int, 
+                   pval = diff1d1$summary$`Pr(>|t|)`)
+```
+
+```{r resdif1d2}
+L1d2 <- matrix(c(1, 0, 1, 0, 0, 0), ncol = 6, byrow = TRUE)
+diff1d2 <- wcls_glh(fit1d, L1d2)
+
+resdiff1d2 <- cbind(name = c("beta1 + beta3"), 
+                  estimator = diff1d2$summary$Estimate, 
+                   sd = diff1d2$summary$`Std. Error`, 
+                   diff1d2$conf_int, 
+                   pval = diff1d2$summary$`Pr(>|t|)`)
+```
+
+```{r resdif1d3}
+L1d3 <- matrix(c(0, 0, 0, 1, 1, 0), ncol = 6, byrow = TRUE)
+
+diff1d3 <- wcls_glh(fit1d, L1d3)
+
+resdiff1d3 <- cbind(name =c("beta4 + beta5"),
+                    estimator = diff1d3$summary$Estimate, 
+                   sd = diff1d3$summary$`Std. Error`, 
+                   diff1d3$conf_int, 
+                   pval = diff1d3$summary$`Pr(>|t|)`)
+```
+
+```{r resdif1d4}
+L1d4 <- matrix(c(0, 0, 0, 1, 0, 1), ncol = 6, byrow = TRUE)
+
+diff1d4 <- wcls_glh(fit1d, L1d4)
+
+resdiff1d4 <- cbind(name = c("beta4 + beta6"),
+                    estimator = diff1d4$summary$Estimate, 
+                   sd = diff1d4$summary$`Std. Error`, 
+                   diff1d4$conf_int, 
+                   pval = diff1d4$summary$`Pr(>|t|)`)
+```
+
+```{r resdif1d5}
+L1d5 <- matrix(c(-1, 0, 0, 1, 0, 0), ncol = 6, byrow = TRUE)
+
+diff1d5 <- wcls_glh(fit1d, L1d5)
+
+resdiff1d5 <- cbind(name = c("beta4 - beta1"), 
+                    estimator = diff1d5$summary$Estimate, 
+                   sd = diff1d5$summary$`Std. Error`, 
+                   diff1d5$conf_int, 
+                   pval = diff1d5$summary$`Pr(>|t|)`)
+```
+
+```{r resdif1d6a}
+L1d6a <- matrix(c(-1, -1, 0, 1, 1, 0), ncol = 6, byrow = TRUE)
+
+diff1d6a <- wcls_glh(fit1d, L1d6a)
+
+resdiff1d6a <- cbind(name = c("beta4 +beta5  - beta1 - beta2"), 
+                    estimator = diff1d6a$summary$Estimate, 
+                   sd = diff1d6a$summary$`Std. Error`, 
+                   diff1d6a$conf_int, 
+                   pval = diff1d6a$summary$`Pr(>|t|)`)
+```
+
+```{r resdif1d6}
+L1d6 <- matrix(c(-1, 0, 0, 1, 0, 0,
+                 0, -1, 0, 0, 1, 0), ncol = 6, byrow = TRUE)
+
+diff1d6 <- wcls_glh(fit1d, L1d6)
+
+#simultaneous pvalue
+resdiff1d6 <-  c("simultaneous", 0, 0, 0, 0, diff1d6$simultaneous_test)
+```
+
+```{r resdif1d7a}
+L1d7a <- matrix(c(-1, 0, -1, 1, 0, 1), ncol = 6, byrow = TRUE)
+
+diff1d7a <- wcls_glh(fit1d, L1d7a)
+
+resdiff1d7a <- cbind(name = c("beta4 + beta6 - beta1 - beta3"), 
+                    estimator = diff1d7a$summary$Estimate, 
+                   sd = diff1d7a$summary$`Std. Error`, 
+                   diff1d7a$conf_int, 
+                   pval = diff1d7a$summary$`Pr(>|t|)`)
+```
+
+```{r resdif1d7}
+L1d7 <- matrix(c(-1, 0, 0, 1, 0, 0,
+                 0, 0, -1, 0, 0, 1), ncol = 6, byrow = TRUE)
+
+diff1d7 <- wcls_glh(fit1d, L1d7)
+
+
+#simultaneous pvalue
+resdiff1d7 <- c("simultaneous", 0, 0, 0, 0, diff1d7$simultaneous_test)
+```
+
+```{r res dif1d }
+resdiff1d <- rbind (resdiff1d1, 
+                 resdiff1d2,
+                 resdiff1d3,
+                 resdiff1d4,
+                 resdiff1d5,
+                 resdiff1d6a,
+                 resdiff1d6,
+                 resdiff1d7a,
+                 resdiff1d7
+                 )
+```
+
+
+## Marginal Model 
+
+\begin{align}
+    Y_t = \beta_1 (Intercept : trt = 1) + \beta_2 (Intercept : trt = 2) + g_t^T\alpha + \epsilon_t
+\end{align}
+
+### Treatment Effect 
+
+```{r results='asis'}
+print(
+kable(
+  res1a,
+  caption = "Intercept model no moderator",
+  digits = 3
+) %>%
+  add_header_above(c(
+    " " = 1,
+    "Effect" = 2,
+    "t adjusted" = 2,
+    " " = 1
+  ))%>% kable_styling(latex_options = "hold_position") %>% save_kable("table_DrinkLess_1a.tex")
+)
+```
+
+Averaging over study days, delivering a standard message increases the average time of user using the app by 10.5 second ($95\%$ CI unadjusted = `r round(fit1a$conf_int[1,],2)`, $95\%$ CI z adjusted = `r round(fit1a$conf_int_adjusted_z[1,],2)`, $95\%$ CI t adjusted = `r round(fit1a$conf_int_adjusted_t[1,],2)`). 
+
+Similarly, delivering new notification increasestime of user using the app by 12.1 second on average compared to user that received no notification ($95\%$ CI unadjusted = `r round(fit1a$conf_int[2,],2)`, $95\%$ CI z adjusted = `r round(fit1a$conf_int_adjusted_z[2,],2)`, $95\%$ CI t adjusted = `r round(fit1a$conf_int_adjusted_t[2,],2)`).
+
+
+### Between Treatment effect
+
+Averaging over study days, The effect between delivering walking suggestion versus antisedentary suggestions is not significant. 
+
+```{r results='asis'}
+print(
+kable(
+  resdiff1a,
+  caption = "Intercept model no moderator",
+  digits = 2
+) %>%
+  add_header_above(c(
+    " " = 1,
+    "Effect" = 2,
+    "CI" = 2,
+    " " = 1
+  ))%>% kable_styling(latex_options = "hold_position") %>% save_kable("table_DrinkLess_resdif1a.tex")
+)
+```
+
+
+## Decision point as moderator.  
+
+\begin{align}
+      Y_t = &\beta_1 (Intercept : trt = 1) + \beta_2 (time :trt = 1) + \\
+            &\beta_3 (Intercept : trt = 2) + \beta_4 (time :trt = 2) + g_t^T\alpha + \epsilon_t
+\end{align}
+
+### Treatment effect
+
+```{r results='asis'}
+print(
+kable(
+  res1b,
+  caption = "decision point as moderator",
+  digits = 3
+) %>%
+  add_header_above(c(
+    " " = 1,
+    "Effect" = 2,
+    "t adjusted" = 2,
+    " " = 1
+  ))%>% kable_styling(latex_options = "hold_position") %>% save_kable("table_DrinkLess_1b.tex")
+)
+```
+
+
+Delivering a standard notification initially increases the time of participant using the app by 21.73 seconds on average compared to participant who did not receive any notification($95\%$ CI unadjusted = `r round(fit1b$conf_int[1,],2)`, $95\%$ CI z adjusted = `r round(fit1b$conf_int_adjusted_z[1,],2)`, $95\%$ CI t adjusted = `r round(fit1b$conf_int_adjusted_t[1,],2)`). The initial  effect decreases linearly  with time at 0.7 a day ($95\%$ CI unadjusted = `r round(fit1b$conf_int[2,],2)`, $95\%$ CI z adjusted = `r round(fit1b$conf_int_adjusted_z[2,],2)`, $95\%$ CI t adjusted = `r round(fit1b$conf_int_adjusted_t[2,],2)`). 
+
+Delivering a new notification initially increases the time of participant using the app by 29.5 seconds on average compared to participant who did not receive any notification($95\%$ CI unadjusted = `r round(fit1b$conf_int[3,],2)`, $95\%$ CI z adjusted = `r round(fit1b$conf_int_adjusted_z[3,],2)`, $95\%$ CI t adjusted = `r round(fit1b$conf_int_adjusted_t[3,],2)`). The initial  effect decreases linearly  with time at 0.7 a day ($95\%$ CI unadjusted = `r round(fit1b$conf_int[4,],2)`, $95\%$ CI z adjusted = `r round(fit1b$conf_int_adjusted_z[4,],2)`, $95\%$ CI t adjusted = `r round(fit1b$conf_int_adjusted_t[4,],2)`). 
+
+### Between treatment effect
+
+```{r results='asis'}
+print(
+kable(
+  resdiff1b,
+  caption = "time moderator",
+  digits = 4
+) %>%
+  add_header_above(c(
+    " " = 1,
+    "Effect" = 2,
+    "CI" = 2,
+    " " = 1
+  ))%>% kable_styling(latex_options = "hold_position") %>% save_kable("table_DrinkLess_resdic1b.tex")
+)
+```
+
+## Audit score as moderator
+
+\begin{align}
+      Y_t = &\beta_1 (Intercept : trt = 1) + \beta_2 (Audit score :trt = 1) + \\
+            &\beta_3 (Intercept : trt = 2) + \beta_4 (Audit score :trt = 2) + g_t^T\alpha + \epsilon_t
+\end{align}
+
+### Treatment Effect
+
+```{r results='asis'}
+print(
+kable(
+  res1c,
+  caption = "Audit Score as moderator",
+  digits = 3
+) %>%
+  add_header_above(c(
+    " " = 1,
+    "Effect" = 2,
+    "t adjusted" = 2,
+    " " = 1
+  ))%>% kable_styling(latex_options = "hold_position") %>% save_kable("table_DrinkLess_1c.tex")
+) 
+```
+
+Neither new notification nor the new notification was significant. 
+
+### Between treatment effect
+
+## Audit Stratified (hazardous vs harmful vs at risk) as moderator 
+
+\begin{align}
+    Y_t = &\beta_1 (Intercept : trt = 1) + \beta_2 (audit harmful : trt = 1) + \beta_3 (audit at risk : trt = 1)\\
+      &\beta_4 (Intercept : trt = 2) + \beta_5 (audit harmful : trt = 1) + \beta_6 (audit at risk : trt = 1) + g_t^T\alpha + \epsilon_t
+\end{align}
+
+
+### Treatment effect
+
+```{r results='asis'}
+print(
+kable(
+  res1d,
+  caption = "Audit Score as moderator",
+  digits = 3
+) %>%
+  add_header_above(c(
+    " " = 1,
+    "Effect" = 2,
+    "t adjusted" = 2,
+    " " = 1
+  ))%>% kable_styling(latex_options = "hold_position") %>% save_kable("table_DrinkLess_1d.tex")
+)
+```
+
+
+Neither new notification nor the new notification was significant. 
+
+### Between treatment effect
+
+```{r results='asis'}
+print(
+kable(
+  resdiff1d,
+  caption = "big big table",
+  digits = 3, 
+  float = TRUE
+) %>%
+  add_header_above(c(
+    " " = 1,
+    "Effect" = 2,
+    "CI" = 2,
+    " " = 1
+  )) %>% kable_styling(latex_options = "hold_position") %>% save_kable("table_DrinkLess_res1d.tex")
+)
+```
+
+
+
