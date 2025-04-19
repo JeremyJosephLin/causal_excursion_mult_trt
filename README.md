@@ -4,10 +4,9 @@ Reproducible code for paper "Causal excursion effect for continuous outcome with
 
 ## File structure
 
-- application code: code to reproduce results in Section 5 "Application".
+- application code: code to reproduce results in Section 5 "Data Example".
 - functions: code containing relevant user-defined R functions
-- misc code: code to make plots to illustrate generative models in Section 6.1 "Generative Models".
-- simulation code: code to reproduce simulation results in Section 6 "Detailed Simulation Results" (Sec. 6.2-6.7) and Supplementary Material D.
+- simulation code: code to reproduce simulation results in Section 4 "Sample Size Formula with Categorical Treatment" (Sec. 4.3) and Appendix C and D.
 
 ## How to reproduce the results
 
