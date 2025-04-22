@@ -1,4 +1,4 @@
-# paper_MRTSampleSizeBinary
+# paper_Causal_excursion_mult_trt
 
 Reproducible code for paper "Causal excursion effect for continuous outcome with multilevel treatment" by Jeremy Lin and Tianchen Qian
 
