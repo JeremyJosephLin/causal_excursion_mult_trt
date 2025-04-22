@@ -31,13 +31,14 @@ To reproduce the results in Section 5, "Data Example," run all R scripts in the 
 | S4d             | simulation/power simulation/2.WA-a violated/sim 2.3a/sim_2_3a_report.Rmd               |
 | S4e             | simulation/power simulation/2.WA-a violated/sim 2.4a/sim_2_4a_report.Rmd               |
 | S4f             | simulation/power simulation/2.WA-a violated/sim 2.6a/sim_2_6a_report.Rmd               |
-| S5a             | simulation/power simulation/3.WA-b violated/sim 4.1a/result/sim_4_1_report.Rmd         |
-| S5b             | simulation/power simulation/3.WA-b violated/sim 4.1a/result/sim_const_true_eo.Rmd      |
-| S5c,d           | power simulation/3.WA-b violated/sim 4.1a/result/sim_const_working_eo.Rmd              |
-| S6              | simulation code/5. WA-d violated (Sec 6.6)/make figure 10.R                            |
-| 14              | simulation code/6. WA-e violated (Sec 6.7)/make figure 11.R                            |
-| 15              | simulation code/7. multiple WAs violated (Sec 6.8)/make figure 12.R                    |
-| D.1             | simulation code/8. WA-a violated (additional results in Appendix D.1)/make figure A1.R |
-| D.2             | simulation code/9. WA-b violated (additional results in Appendix D.2)/make figure A2.R |
-
-
+| S5a             | simulation/power simulation/3.WA-b violated/result/sim_4_1_report.Rmd                  |
+| S5b             | simulation/power simulation/3.WA-b violated/result/sim_const_true_eo.Rmd               |
+| S5c,d           | simulation/power simulation/3.WA-b violated/result/sim_const_working_eo.Rmd            |
+| S6              | simulation/misc/sample size.Rmd                                                        |
+| S7              | simulation/power simulation/3.WA-b violated/result/sim_4_7_report.Rmd                  |
+| S8              | simulation/power simulation/4. WA-c violated/sim 5.1a/sim_5_1_report.Rmd               |
+| S9              | simulation/power simulation/5. WA-d violated/sim 7.2a/sim_7_2_report.Rmd               |
+| S10a            | simulation/power simulation/5. WA-d violated/sim 7.3a/sim_7_3_report.Rmd               |
+| S10b            | simulation/power simulation/5. WA-d violated/sim 7.1a/sim_7_1_report.Rmd               |
+| S11             | simulation/power simulation/5. WA-e violated/sim 6.1a/sim_6_1_report.Rmd               |
+| S12             | simulation/power simulation/5. WA-f violated/sim 8.1a/sim_8_1a_report.Rmd              |
