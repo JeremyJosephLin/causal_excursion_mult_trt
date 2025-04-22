@@ -13,9 +13,8 @@ Reproducible code for paper "Causal excursion effect for continuous outcome with
 To reproduce the results in Section 5, "Data Example," run all R scripts in the folder "application code." The R scripts do not depend on one another, so there is no particular order for running.
 - To reproduce simulation results in Section  "Detailed Simulation Results" (Appendix D), do the following for each subfolder inside "simulation code":
     - First, run the R script(s) inside all subfolder(s) "simulationX(.X)". This conducts Monte Carlo simulations and saves result file. **Caution: each R script may take a long time (days) to finish. Also, X.X in simulationX.X does not correspond to Sections in the paper; these indices were created during the development of the paper.**
-    - Second, run the Rmd file(s) named "sim_X.X_report.RMD". This makes plots and results using the simulation result files. **Caution: X in the "make figure X.R" does not correspond to figure index in the paper. See table below for the figure index correspondence.**
-    - For example, to reproduce everything in Section 6.3, go inside folder "2. WA-a violated (Sec 6.3)", then run the R scripts in subfolders "simulation2.2", "simulation2.3", "simulation2.4", "simulation2.5", "simulation4.1". Then, run the three R scripts "sim_X.X_report.RMD", "make figure 2.R", "make figure 3.R".
-- To reproduce Figure 4 in in Sec. 6.1 of the paper, run the three R scripts in folder "misc code".
+    - Second, run the Rmd file(s) named "sim_X_X_report.RMD". This makes plots and results using the simulation result files. **Caution: X in the "make figure X.R" does not correspond to figure index in the paper. See table below for the figure index correspondence.**
+    - For example, to reproduce everything in Section D.4 in the appendix, go inside the folder "2. WA-a violated", then run the R scripts in subfolders "sim 2.1a", "sim 2.2a", "sim 2.3a", "sim 2.4a", "sim 2.5a", "sim 2.6a", and "sim 3.1a". Then, run the Rmd scripts "sim_X_X_report.RMD".
 
 
 | Figure in paper | R script to make the figure                                                            |
