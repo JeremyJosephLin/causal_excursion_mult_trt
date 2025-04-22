@@ -1,0 +1,276 @@
+---
+title: "sample size effect"
+author: "Jeremy Lin"
+date: "2024-04-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+source("~/Research/causal_excursion_mult_trt/R code/functions_util.R")
+# set alpha = 0 in ss since it's not needed
+
+#function to greate gt based on q 
+construct_q_gt <- function(m, q){
+  gt_names <- rep(NA, q)
+  for (i in 1:q) {
+    if (i == 1) {
+      gt <- matrix(1, nrow = m, ncol = 1)
+      gt_names[i] <-c("intercept") 
+    }else{
+      temp <- (1:m)^(i - 1)
+      gt <- cbind(gt,temp) 
+      gt_names[i] <-paste0("time^",i-1)
+    }
+  }
+  if (q != 1) {
+      colnames(gt) <- gt_names
+  }
+
+  return(gt)
+}
+
+construct_q_gt(5,1)
+# sample size calculation 
+
+
+
+```
+
+
+```{r}
+SD <- expand.grid(gamma = 0.05,  # type I error
+                  b = 0.2, # type II error
+                  # m = c(30, 60),
+                  m = c(30),
+                  pt_shape = c("constant equal pk"),
+                  # pt_shape = c("constant 0.5"),
+                  ft_t_shape = c("constant", "linear_theta"),
+                  ft_t_theta = c(0, 0.3),
+                  ft_t_theta2 = 0,
+                  # for specifying gt when gt_t_shape is linear or quadratic
+                  # ATE_t = c(1.2, 1.3, 1.4, 1.5),
+                  ATE1_t = seq(1.1, 1.2, by = 0.05),
+                  ATE1_t_empirical = NA,
+                  ATE2_t = c(1.4),
+                  ATE2_t_empirical = NA,
+                  #AvgTau_t = c(0.5, 0.8, 1),
+                  AvgTau_t = c(1),
+                  tau_t_shape = c("constant"),
+                  beta1_t0 = NA,
+                  beta1_t1 = NA,
+                  beta1_t2 = NA,
+                  beta2_t0 = NA,
+                  beta2_t1 = NA,
+                  beta2_t2 = NA,
+                  p = NA,
+                  q = seq(1: 20),
+                  ft_w_shape = NA,
+                  ft_w_theta = NA,
+                  ft_w_theta2 = NA,
+                  beta1_w0 = NA,
+                  beta1_w1 = NA,
+                  beta1_w2 = NA,
+                  beta2_w0 = NA,
+                  beta2_w1 = NA,
+                  beta2_w2 = NA,
+                  ATE1_w = NA,
+                  ATE1_w_empirical = NA,
+                  ATE2_w = NA,
+                  ATE2_w_empirical = NA,
+                  AvgTau_w = NA,
+                  tau_w_shape = NA,
+                  p_w = NA,
+                  n = NA,
+                  p_star = NA,
+                  
+                  stringsAsFactors = FALSE)
+
+# remove simulation settings where pt*ft is not in the linear span of gt
+SD <- SD[!(SD$ft_t_shape == "linear_theta" &
+             SD$q == 1), ]
+# SD <- SD[!(SD$ft_t_shape == "quadratic_theta" &
+#              SD$gt_t_shape != "quadratic_theta"), ]
+
+SD <- SD[!(SD$ft_t_shape == "constant" &
+             SD$ft_t_theta != 0), ]
+SD <- SD[!(SD$ft_t_shape == "linear_theta" &
+             SD$ft_t_theta == 0), ]
+
+SD <- SD[!(SD$AvgTau_t == 1 &
+             SD$tau_t_shape != "constant"), ]
+
+## add stuff that are known by simulation design
+# taut
+SD$AvgTau_w <- SD$AvgTau_t
+SD$tau_w_shape <- SD$tau_t_shape
+# gt
+#SD$gt_w_shape <- SD$gt_t_shape
+#SD$gt_w_theta <- SD$gt_t_theta
+#SD$ASPNC_w <- SD$ASPNC_t 
+# ft
+SD$ft_w_shape <- SD$ft_t_shape
+SD$ft_w_theta <- SD$ft_t_theta
+SD$ft_w_theta2 <- SD$ft_t_theta2
+SD$ATE1_w <- SD$ATE1_t
+SD$ATE2_w <- SD$ATE2_t
+
+
+##### fill the SD #####
+
+options(warn = 2)
+for (i in 1:nrow(SD)) {
+  
+  ## gamma, b, m
+  gamma <- SD$gamma[i]
+  b <- SD$b[i]
+  m <- SD$m[i]
+  
+  ## pt
+  pt <- construct_pt(m, SD$pt_shape[i])
+  
+  ## taut_t
+  taut_t <- construct_taut_theta(m , SD$AvgTau_t[i], SD$tau_t_shape[i])
+  
+  ## gt_t, alpha_t
+  gt_t <- construct_q_gt(m, SD$q[i])
+
+  ## ft_t, beta1_t, beta2_t
+  ft_t <- construct_ftgt(m, SD$ft_t_shape[i])
+  SD$p[i] <- ncol(ft_t)
+  # trt 1 effect
+  beta1_t <- solve_beta(SD$ft_t_shape[i], m, SD$ATE1_t[i], ft_t, taut_t, theta = SD$ft_t_theta[i])
+  SD[i, c("beta1_t0", "beta1_t1", "beta1_t2")[1:SD$p[i]]] <- beta1_t
+  SD$ATE1_t_empirical[i] <- compute_ATE(ft_t, beta1_t, taut_t)
+  stopifnot(all.equal(SD$ATE1_t[i], SD$ATE1_t_empirical[i]))
+  # trt 2 effect
+  beta2_tstar <- solve_beta_star(SD$ft_t_shape[i], m, SD$ATE2_t[i], ft_t, taut_t, theta = SD$ft_t_theta2[i], beta1 = beta1_t)
+  beta2_t <- beta1_t +beta2_tstar 
+  SD[i, c("beta2_t0", "beta2_t1", "beta2_t2")[1:SD$p[i]]] <- beta2_t
+  SD$ATE2_t_empirical[i] <- compute_ATE(ft_t, beta2_t, taut_t)
+  stopifnot(all.equal(SD$ATE2_t[i], SD$ATE2_t_empirical[i]))
+  
+  ## taut_w
+  taut_w <- construct_taut_theta(m, SD$AvgTau_w[i], SD$tau_w_shape[i])
+  
+  ## gt_w, alpha_w
+  gt_w <- construct_q_gt(m, SD$q[i])
+  
+  ## ft_w
+  ft_w <- construct_ftgt(m, SD$ft_w_shape[i])
+  SD$p_w[i] <- ncol(ft_w)
+  # trt 1 eff
+  beta1_w <- solve_beta(SD$ft_w_shape[i], m, SD$ATE1_w[i], ft_w,
+                        taut_w, theta = SD$ft_w_theta[i])
+  SD[i, c("beta1_w0", "beta1_w1", "beta1_w2")[1:SD$p_w[i]]] <- beta1_w
+  SD$ATE1_w_empirical[i] <- compute_ATE(ft_w, beta1_w, taut_w)
+  stopifnot(all.equal(SD$ATE1_w[i], SD$ATE1_w_empirical[i]))
+  # trt 2 eff
+  beta2_wstar <- solve_beta_star(SD$ft_w_shape[i], m, SD$ATE2_w[i], ft_w,
+                        taut_w, theta = SD$ft_w_theta2[i], beta1 = beta1_w)
+  beta2_w <- beta1_w + beta2_wstar
+  SD[i, c("beta2_w0", "beta2_w1", "beta2_w2")[1:SD$p_w[i]]] <- beta2_w
+  SD$ATE2_w_empirical[i] <- compute_ATE(ft_w, beta2_w, taut_w)
+  stopifnot(all.equal(SD$ATE2_w[i], SD$ATE2_w_empirical[i]))
+  
+  ## sample size n
+  tryCatch({
+    beta_w <- c(beta1_w, beta2_w)
+    L <- construct_L(SD$ft_w_shape[i])
+    SD$n[i] <- mrt_mult_trt_ss(ft_w, gt_w, beta_w, alpha = 0, pt, mean_var = 1, gamma, b,
+                               L, tau = taut_w)
+    SD$p_star[i] <- dim(L)[1]
+  },
+  error = function(cond){
+    message("iteration ", i, ": ", cond)
+    return(NA)
+  })
+  
+  if (!is.na(SD$n[i])) {
+    ## generate a data set to make sure there are no probabilities outside [0,1]
+    #dta <- dgm_1(SD$n[i], total_T = m, ft = ft_t, beta_1 = beta1_t, beta_2 = beta2_t, gt = gt_t, alpha = alpha_t, tau = taut_t, pt = pt)
+  }
+}
+
+
+
+```
+
+
+```{r}
+# change font size, legend position
+myggfont <- function(legend_pos = NULL,
+                     legend_text_size = 18,
+                     legend_title_size = 20,
+                     axis_text_size = 16,
+                     axis_title_size = 20,
+                     plot_title_size = 20,
+                     facet_text_size = 16) {
+  ff <- theme(legend.text = element_text(size = legend_text_size),
+              legend.title = element_text(size = legend_title_size),
+              axis.text = element_text(size = axis_text_size),
+              axis.title = element_text(size = axis_title_size, face="bold"),
+              plot.title = element_text(size = plot_title_size),
+              strip.text.x = element_text(size = facet_text_size),
+              strip.text.y = element_text(size = facet_text_size))
+  if (is.null(legend_pos)) {
+    return(ff)
+  } else if (legend_pos == "top-left") {
+    return(ff + theme(legend.justification = c(0,1), legend.position = c(0,1)))
+  } else if (legend_pos == "top-right") {
+    return(ff + theme(legend.justification = c(1,1), legend.position = c(1,1)))
+  } else if (legend_pos == "bottom-left") {
+    return(ff + theme(legend.justification = c(0,0), legend.position = c(0,0)))
+  } else if (legend_pos == "bottom-right") {
+    return(ff + theme(legend.justification = c(1,0), legend.position = c(1,0)))
+  } else {
+    stop("legend_pos needs to be NULL, top-left, top-right, bottom-left, or bottom-right.")
+  }
+}
+```
+
+```{r}
+library(metR)
+
+SD$delta_ATE <- round(SD$ATE2_w - SD$ATE1_t,3)
+SD$ft_w_shape_theta <- paste0(SD$ft_w_shape, SD$ft_w_theta)
+SD %>%
+  ggplot(aes(x = q, y = n, linetype = factor(ft_w_shape_theta), color = factor(delta_ATE))) +
+  geom_line() +
+  geom_hline(yintercept = 0.8, linetype = 2) +
+  scale_linetype_discrete(name = TeX(r'($MEE^*$)'),
+                          labels = c(TeX(r'($MEE^*$ constant)'),
+                                     TeX(r'($MEE^*$ Linear)'))) +
+  scale_color_discrete(name = TeX(r'($\Delta ATE$)'),
+                       labels = c(TeX(r'($\Delta ATE^* = \Delta ATE^w = 0.2$)'),
+                                  TeX(r'($\Delta ATE^* = \Delta ATE^w = 0.25$)'),
+                                  TeX(r'($\Delta ATE^* = \Delta ATE^w = 0.3$)'))) +
+    # scale_color_discrete(name = TeX(r'($ATE^* = ATE^w$, $ASPN^* = ASPN^w$)'),
+    #                      labels = c(TeX(r'($ATE = 1.2$, $ASPN = 0.2$)'),
+    #                                 TeX(r'($ATE = 1.2$, $ASPN = 0.3$)'),
+    #                                 TeX(r'($ATE = 1.2$, $ASPN = 0.4$)'),
+    #                                 TeX(r'($ATE = 1.3$, $ASPN = 0.2$)'),
+    #                                 TeX(r'($ATE = 1.3$, $ASPN = 0.3$)'),
+    #                                 TeX(r'($ATE = 1.3$, $ASPN = 0.4$)'))) +
+    xlab(TeX(r'($q$)')) +
+    ylab("n") +
+    #ggtitle(TeX(r'($SPNC^w(t)$: constant)')) +
+    coord_cartesian(ylim = c(20, 50), xlim = c(1, 20)) +
+    #scale_y_continuous(breaks = seq(from = 0.1, to = 1, by = 0.1)) +
+    #scale_x_continuous(breaks = c(-1,0,1)) +
+    # facet_grid(gt_t_theta ~ ASPNC_t, labeller = label_both) +
+    theme_bw() + 
+    myggfont() +
+    theme(legend.text.align = 0, plot.title = element_text(hjust = 0.5))
+ggsave(paste0("n versus q - sample size.pdf"), width =9, height = 8) 
+```
+

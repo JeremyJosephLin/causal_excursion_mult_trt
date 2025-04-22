@@ -1,0 +1,280 @@
+---
+title: "Simulation 3_1"
+author: "Jeremy J Lin"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document :
+    keep_tex: true
+    extra_dependencies: "subfig"
+header-includes:
+ - \usepackage{booktabs}
+ - \usepackage{longtable}
+ - \usepackage{array}
+ - \usepackage{multirow}
+ - \usepackage{wrapfig}
+ - \usepackage{float}
+ - \usepackage{subfig}
+ - \floatplacement{figure}{H}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(nlme)
+library(Matrix)
+library(MASS)
+library(rootSolve)
+library(geepack)
+library(lme4)
+library(mvtnorm)
+library(reshape2)
+library(knitr)
+library(ggplot2)
+library(tidyr)
+library(gridExtra)
+library(tidyverse)
+library(dplyr)
+library(kableExtra)
+library(corrplot)
+library(robustHD)
+library(pracma)
+library(xtable)
+library(latex2exp)
+library(janitor)
+library(ggpubr)
+# parallel computing libraries
+library(foreach)
+#library(doMC)
+# beep beep 
+library(beepr)
+library(doParallel)
+library(doSNOW)
+library(utils)
+library(foreach)
+library(doRNG)
+library(geepack)
+```
+
+```{r echo=FALSE}
+#rm(list = ls())
+
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, 
+                      warning = FALSE, results = "hide", 
+                      fig.pos = 'H', cache = FALSE, 
+                      eval = FALSE)
+# load functions
+source("~/Research/LMM_Project/dgm simutlations/R_functions.R")
+```
+
+<!-- Functions -->
+
+# Simulation Settings 
+
+Repeated across 400 simulations with different combination of small total T and small total n.
+We would like to compare this with the theoretical asymptotic variance with sample size adjustment
+
+Availability depends on time, with linear treatment effect 
+
+\begin{align*}
+  Y_{i, t, 1} | H_t, A_t &= I_{(A_{i,t} = 1)} \beta_1 + I_{(A_{i,t} = 2)} \beta_2 + 1 + \epsilon_{i,t}\\
+  A_{i,t} &= \{0, 1, 2\}\\
+  P(A_t = 0 |H_t) &=\tilde{p_0}  = 0.2\\
+  P(A_t = 1 |H_t) &=\tilde{p_1}  = 0.5\\
+  P(A_t = 2 |H_t) &=\tilde{p_2}  = 0.3\\
+  P(I_t = 0.5)\\
+  \beta_1 &= 0.1\\
+  \beta_2 &= 0.4
+\end{align*}
+
+```{r}
+# change font size, legend position
+myggfont <- function(legend_pos = NULL,
+                     legend_text_size = 18,
+                     legend_title_size = 20,
+                     axis_text_size = 22,
+                     axis_title_size = 26,
+                     plot_title_size = 20,
+                     facet_text_size = 16) {
+  ff <- theme(legend.text = element_text(size = legend_text_size),
+              legend.title = element_text(size = legend_title_size),
+              axis.text = element_text(size = axis_text_size),
+              axis.title = element_text(size = axis_title_size, face="bold"),
+              plot.title = element_text(size = plot_title_size),
+              strip.text.x = element_text(size = facet_text_size),
+              strip.text.y = element_text(size = facet_text_size))
+  if (is.null(legend_pos)) {
+    return(ff)
+  } else if (legend_pos == "top-left") {
+    return(ff + theme(legend.justification = c(0,1), legend.position = c(0,1)))
+  } else if (legend_pos == "top-right") {
+    return(ff + theme(legend.justification = c(1,1), legend.position = c(1,1)))
+  } else if (legend_pos == "bottom-left") {
+    return(ff + theme(legend.justification = c(0,0), legend.position = c(0,0)))
+  } else if (legend_pos == "bottom-right") {
+    return(ff + theme(legend.justification = c(1,0), legend.position = c(1,0)))
+  } else {
+    stop("legend_pos needs to be NULL, top-left, top-right, bottom-left, or bottom-right.")
+  }
+}
+```
+
+
+```{r}
+source("~/Documents/Research/causal_excursion_mult_trt/simulation_results/Power Simulation/viol_2/sim_4_1a/functions_util.R")
+# read simulation design 
+SD <- readRDS("~/Documents/Research/causal_excursion_mult_trt/simulation_results/Power Simulation/viol_2/sim_4_1a/Simulation_design.RDS")
+n_seed = 6 
+nsim = 500
+truth_hypothesis = "H1"
+dim(SD)
+
+result_list = list()
+for (isim in 1:n_seed) {
+  fileName = paste("results_sim_4_1a_setting_",isim,"_",nsim,".RDS",sep = "")
+  res <- readRDS(paste0(fileName))
+  print(length(res))
+  result_list <- c(result_list, res)
+}
+length(result_list)
+
+setting = length(result_list)
+result_df_collected <- data.frame()
+result_list_collected <- list()
+
+start_time <- Sys.time()
+
+for (isetting in 1:setting) {
+  
+  current_time <- Sys.time()
+  print(Sys.time())
+  print(paste0(round(difftime(current_time, start_time, units = "hours"), 2),
+               " hours has lapsed."))
+  cat("i =", isetting, "/", nrow(SD), "\n")
+  
+  #print(SD[i, ])
+  
+  i <- result_list[[isetting]]$setting
+  result <- result_list[[isetting]]$result
+  
+  ## gamma, b, m
+  gamma <- SD$gamma[i]
+  b <- SD$b[i]
+  m <- SD$m[i]
+  
+  ## n, p_w, q_w
+  n <- SD$n[i]
+  p_w <- SD$p_w[i]
+  q_w <- SD$q_w[i]
+  p_star <- SD$p_star[i] # This is the degree of freedom of T test
+  p <- 2 *p_w # this is the dimension of beta
+  q <- q_w
+  
+  ##### simulation begins #####
+  test_stat_unadj <- sapply(result, function(l) l$test_stat_unadj)
+  test_stat_adj <- sapply(result, function(l) l$test_stat_adj)
+  
+  # fit <- sapply(result, function(l) l$fit$beta_hat)
+  # fit_mean <- colMeans(fit)
+  
+  cri_val <- (p_star * (n - q - 1)) / (n - p_star - q) *
+    qf(1 - gamma, p_star, n - p_star - q)
+  
+  print(cri_val)
+  
+
+  if (truth_hypothesis == "H1") {
+    power_unadj <- sum(test_stat_unadj > cri_val) / nsim
+    power_adj <- sum(test_stat_adj > cri_val) / nsim
+    power_vec <- c(power_unadj, power_adj)
+    names(power_vec) <- c("power_unadj", "power_adj")
+    print(power_vec)
+  } else if (truth_hypothesis == "H0") {
+    typeierror_unadj <- sum(test_stat_unadj > cri_val) / nsim
+    typeierror_adj <- sum(test_stat_adj > cri_val) / nsim
+    typeierror_vec <- c(typeierror_unadj,typeierror_adj )
+    names(typeierror_vec) <- c("typeierror_unadj","typeierror_adj" )
+    print(typeierror_vec)
+  }
+
+  result_df <- cbind(SD[i, ],
+                     data.frame(power_unadj = power_unadj,
+                                power_adj = power_adj))             
+  
+  result_df_collected <- rbind(result_df_collected, result_df)
+  result_list_collected <- c(result_list_collected, list(list(
+    result_df = result_df,
+    test_stat_unadj = test_stat_unadj, 
+    test_stat_adj = test_stat_adj
+  )))
+}
+  saveRDS(result_df_collected, file = paste0("result_df_4_1collected_nsim", nsim, ".RDS"))
+  saveRDS(result_list_collected, file = paste0("result_list_4_1collected_nsim", nsim, ".RDS"))
+  write.csv(result_df_collected, file = paste0("result_df_4_1collected_nsim", nsim, ".csv"))
+
+```
+
+
+```{r}
+# 3. Make plots and tables ------------------------------------------------
+    nsim <- 500
+    
+    result <- readRDS(paste0("result_df_4_1collected_nsim", nsim, ".RDS"))
+    
+    result$ASPNC_t_and_gt_shape_and_gt_t_theta <-
+      paste0(result$ASPNC_t, result$gt_t_shape, result$gt_t_theta)
+    result$gt_shape_and_gt_t_theta <-
+      paste0(result$gt_t_shape, result$gt_t_theta)
+    
+    # added delta_ATE
+    result$delta_ATE <- round(result$ATE2_t - result$ATE1_t, 1) 
+    
+    result$ATE_t_and_ASPNC_t <- paste0(result$delta_ATE, " ", result$ft_t_theta, " ",result$ft_t_shape)
+    
+    result$gt_t_shape_and_theta <- paste0(result$gt_t_shape, result$gt_t_theta)
+
+    result$ASPNC_tw_diff <- result$ASPNC_t - result$ASPNC_w
+
+
+    result$ASPNC_name <- factor(result$ASPNC_t, labels=c("0.2"=parse(text= TeX(r'($Mean = 0.2$ )')),
+                                               "0.4"=parse(text= TeX(r'($Mean = 0.4$ )')),
+                                               "0.6"=parse(text= TeX(r'($Mean = 0.6$ )'))
+                                               ))
+```
+
+
+```{r}
+result %>% 
+    filter(! gt_t_shape_and_theta  %in% c("linear_theta0", "quadratic_theta0")) %>%
+    filter(! ATE_t_and_ASPNC_t %in% c("0.1 0 linear_theta","0.1 0 linear_theta")) %>% 
+    ggplot(aes(x = ASPNC_tw_ratio, y = power_adj, linetype = factor(ATE_t_and_ASPNC_t),
+               color = factor(gt_t_shape_and_theta))) +
+    facet_grid(~ ASPNC_name, labeller = label_parsed)+
+    geom_line()+
+    geom_hline(yintercept = 0.8, linetype = 2) +
+    scale_linetype_discrete(name = TeX(r'(Pattern of $sMEE^*(t) = sMEE^w(t)$)'),
+                         labels = c(TeX(r'($\Delta ATE = 0.3$ linear, $\theta_f^* = \theta_f^w = -0.3$)'),
+                                    TeX(r'($\Delta ATE = 0.3$ linear, $\theta_f^* = \theta_f^w = 0.3$)'),
+                                    TeX(r'($\Delta ATE = 0.4$ linear, $\theta_f^* = \theta_f^w = -0.3$)'),
+                                    TeX(r'($\Delta ATE = 0.4$ linear, $\theta_f^* = \theta_f^w = 0.3$)'))) +
+    scale_color_discrete(name = TeX(r'(Pattern of $EO^*(t)$ and $EO^w(t)$ )'),
+                            labels = c(
+                                       TeX(r'(linear, $\theta_g^* = \theta_g^w = -0.2$)'),
+                                       #TeX(r'(linear, $\theta_g^* = \theta_g^w = 0$)'),
+                                       TeX(r'(linear, $\theta_g^* = \theta_g^w = 0.2$)'),
+                                       TeX(r'(quadratic, $\theta_g^* = \theta_g^w = -0.2$)'),
+                                       # TeX(r'(quadratic, $\theta_g^* = \theta_g^w = 0$)'),
+                                       TeX(r'(quadratic, $\theta_g^* = \theta_g^w = 0.2$)'))) +
+    xlab(TeX(r'($AEO^*/AEO^w$)')) +
+    ylab("power") +
+    coord_cartesian(ylim = c(0.5, 0.83)) +
+    scale_y_continuous(breaks = seq(from = 0.1, to = 1, by = 0.1)) +
+    #scale_x_continuous(breaks = c(-1,0,1)) +
+    # facet_grid(gt_t_theta ~ ASPNC_t, labeller = label_both) +
+    theme_bw() + 
+    myggfont() +
+    theme(legend.text.align = 0)
+ggsave(paste0("figure 4_1 - power.pdf"), width = 12, height = 8)
+```
+
+`
+

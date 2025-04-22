@@ -1,0 +1,512 @@
+---
+title: "Simulation 1_1_1"
+author: "Jeremy J Lin"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document :
+    keep_tex: true
+    extra_dependencies: "subfig"
+header-includes:
+ - \usepackage{booktabs}
+ - \usepackage{longtable}
+ - \usepackage{array}
+ - \usepackage{multirow}
+ - \usepackage{wrapfig}
+ - \usepackage{float}
+ - \usepackage{subfig}
+ - \floatplacement{figure}{H}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(nlme)
+library(Matrix)
+library(MASS)
+library(rootSolve)
+library(geepack)
+library(lme4)
+library(mvtnorm)
+library(reshape2)
+library(knitr)
+library(ggplot2)
+library(tidyr)
+library(gridExtra)
+library(tidyverse)
+library(dplyr)
+library(kableExtra)
+library(corrplot)
+library(robustHD)
+library(pracma)
+library(xtable)
+library(latex2exp)
+library(janitor)
+library(ggpubr)
+# parallel computing libraries
+library(foreach)
+#library(doMC)
+# beep beep 
+library(beepr)
+library(doParallel)
+library(doSNOW)
+library(utils)
+library(foreach)
+library(doRNG)
+library(geepack)
+```
+
+```{r echo=FALSE}
+#rm(list = ls())
+
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, 
+                      warning = FALSE, results = "hide", 
+                      fig.pos = 'H', cache = FALSE, 
+                      eval = FALSE)
+# load functions
+source("~/Research/LMM_Project/dgm simutlations/R_functions.R")
+```
+
+<!-- Functions -->
+
+# Simulation Settings 
+
+Repeated across 400 simulations with different combination of small total T and small total n.
+We would like to compare this with the theoretical asymptotic variance with sample size adjustment
+
+Availability depends on time, with linear treatment effect 
+
+\begin{align*}
+  Y_{i, t, 1} | H_t, A_t &= I_{(A_{i,t} = 1)} \beta_1 + I_{(A_{i,t} = 2)} \beta_2 + 1 + \epsilon_{i,t}\\
+  A_{i,t} &= \{0, 1, 2\}\\
+  P(A_t = 0 |H_t) &=\tilde{p_0}  = 0.2\\
+  P(A_t = 1 |H_t) &=\tilde{p_1}  = 0.5\\
+  P(A_t = 2 |H_t) &=\tilde{p_2}  = 0.3\\
+  P(I_t = 0.5)\\
+  \beta_1 &= 0.1\\
+  \beta_2 &= 0.4
+\end{align*}
+
+```{r}
+# change font size, legend position
+myggfont <- function(legend_pos = NULL,
+                     legend_text_size = 16,
+                     legend_title_size = 18,
+                     axis_text_size = 12,
+                     axis_title_size = 18,
+                     plot_title_size = 18,
+                     facet_text_size = 12) {
+  ff <- theme(legend.text = element_text(size = legend_text_size),
+              legend.title = element_text(size = legend_title_size),
+              axis.text = element_text(size = axis_text_size),
+              axis.title = element_text(size = axis_title_size, face="bold"),
+              plot.title = element_text(size = plot_title_size),
+              strip.text.x = element_text(size = facet_text_size),
+              strip.text.y = element_text(size = facet_text_size))
+  if (is.null(legend_pos)) {
+    return(ff)
+  } else if (legend_pos == "top-left") {
+    return(ff + theme(legend.justification = c(0,1), legend.position = c(0,1)))
+  } else if (legend_pos == "top-right") {
+    return(ff + theme(legend.justification = c(1,1), legend.position = c(1,1)))
+  } else if (legend_pos == "bottom-left") {
+    return(ff + theme(legend.justification = c(0,0), legend.position = c(0,0)))
+  } else if (legend_pos == "bottom-right") {
+    return(ff + theme(legend.justification = c(1,0), legend.position = c(1,0)))
+  } else {
+    stop("legend_pos needs to be NULL, top-left, top-right, bottom-left, or bottom-right.")
+  }
+}
+```
+
+
+```{r, eval=FALSE}
+# combine data 
+source("~/Research/causal_excursion_mult_trt/simulation_results/Power Simulation/sim_1/sim_1_2/sim_1_2_hpc/functions_util.R")
+# read simulation design 
+SD <- readRDS("~/Research/causal_excursion_mult_trt/simulation_results/Power Simulation/sim_1/sim_1_2/sim_1_2_hpc/Simulation_design.RDS")
+n_seed = 1 
+nsim = 500
+
+setting = 1000
+result_df_collected <- data.frame()
+result_list_collected <- list()
+
+start_time <- Sys.time()
+for (i in 1:setting) {
+  
+  current_time <- Sys.time()
+  print(Sys.time())
+  print(paste0(round(difftime(current_time, start_time, units = "hours"), 2),
+               " hours has lapsed."))
+  cat("i =", i, "/", nrow(SD), "\n")
+  
+  #print(SD[i, ])
+  
+  # collect all result from this setting
+  result = list()
+  for (isim in 1:n_seed) {
+    fileName = paste("results_setting_",i,"_",isim,".RDS",sep = "")
+    res <- readRDS(paste0(fileName))
+    result <- c(result, res)
+  }
+  
+  ## gamma, b, m
+  gamma <- SD$gamma[i]
+  b <- SD$b[i]
+  m <- SD$m[i]
+  
+  ## n, p_w, q_w
+  n <- SD$n[i]
+  p_w <- SD$p_w[i]
+  q_w <- SD$q_w[i]
+  p_star <- SD$p_star[i] # This is the degree of freedom of T test
+  p <- 2 *p_w # this is the dimension of beta
+  q <- q_w
+  
+  ##### simulation begins #####
+  test_stat_unadj <- sapply(result, function(l) l$test_stat_unadj)
+  test_stat_adj <- sapply(result, function(l) l$test_stat_adj)
+  
+  # fit <- sapply(result, function(l) l$fit$beta_hat)
+  # fit_mean <- colMeans(fit)
+  
+  cri_val <- (p_star * (n - q - 1)) / (n - p_star - q) *
+    qf(1 - gamma, p_star, n - p_star - q)
+  
+  #print(cri_val)
+  
+
+    power_unadj <- sum(test_stat_unadj > cri_val) / nsim
+    power_adj <- sum(test_stat_adj > cri_val) / nsim
+    power_vec <- c(power_unadj, power_adj)
+    names(power_vec) <- c("power_unadj", "power_adj")
+    #print(power_vec)
+
+  
+    result_df <- cbind(SD[i, ],
+                     data.frame(power_unadj = power_unadj,
+                                power_adj = power_adj))             
+  
+    result_df_collected <- rbind(result_df_collected, result_df)
+    result_list_collected <- c(result_list_collected, list(list(
+    result_df = result_df,
+    test_stat_unadj = test_stat_unadj, 
+    test_stat_adj = test_stat_adj
+    )))
+  
+}
+  
+  saveRDS(result_df_collected, file = paste0("result_df_collected_nsim", nsim, ".RDS"))
+  saveRDS(result_list_collected, file = paste0("result_list_collected_nsim", nsim, ".RDS"))
+  write.csv(result_df_collected, file = paste0("result_df_collected_nsim", nsim, ".csv"))
+  
+```
+
+```{r}
+source("~/Research/causal_excursion_mult_trt/simulation_results/Power Simulation/sim_1/sim_1_2/sim_1_2_hpc/functions_util.R")
+# read simulation design 
+SD <- readRDS("~/Research/causal_excursion_mult_trt/simulation_results/Power Simulation/sim_1/sim_1_2/sim_1_2_hpc/Simulation_design.RDS")
+n_seed = 4 
+nsim = 500
+truth_hypothesis = "H0"
+dim(SD)
+
+result_list = list()
+for (isim in 1:n_seed) {
+  fileName = paste("results_sim_1_2_setting_",isim,"_",nsim,"b.RDS",sep = "")
+  res <- readRDS(paste0(fileName))
+  print(length(res))
+  result_list <- c(result_list, res)
+}
+length(result_list)
+
+setting = length(result_list)
+result_df_collected <- data.frame()
+result_list_collected <- list()
+
+start_time <- Sys.time()
+
+for (isetting in 1:setting) {
+  
+  current_time <- Sys.time()
+  print(Sys.time())
+  print(paste0(round(difftime(current_time, start_time, units = "hours"), 2),
+               " hours has lapsed."))
+  cat("i =", isetting, "/", nrow(SD), "\n")
+  
+  #print(SD[i, ])
+  
+  i <- result_list[[isetting]]$setting
+  result <- result_list[[isetting]]$result
+  
+  ## gamma, b, m
+  gamma <- SD$gamma[i]
+  b <- SD$b[i]
+  m <- SD$m[i]
+  
+  ## n, p_w, q_w
+  n <- SD$n[i]
+  p_w <- SD$p_w[i]
+  q_w <- SD$q_w[i]
+  p_star <- SD$p_star[i] # This is the degree of freedom of T test
+  p <- 2 *p_w # this is the dimension of beta
+  q <- q_w
+  
+  ##### simulation begins #####
+  test_stat_unadj <- sapply(result, function(l) l$test_stat_unadj)
+  test_stat_adj <- sapply(result, function(l) l$test_stat_adj)
+  
+  # fit <- sapply(result, function(l) l$fit$beta_hat)
+  # fit_mean <- colMeans(fit)
+  
+  cri_val <- (p_star * (n - q - 1)) / (n - p_star - q) *
+    qf(1 - gamma, p_star, n - p_star - q)
+  
+  print(cri_val)
+  
+
+  if (truth_hypothesis == "H1") {
+    power_unadj <- sum(test_stat_unadj > cri_val) / nsim
+    power_adj <- sum(test_stat_adj > cri_val) / nsim
+    power_vec <- c(power_unadj, power_adj)
+    names(power_vec) <- c("power_unadj", "power_adj")
+    print(power_vec)
+  } else if (truth_hypothesis == "H0") {
+    typeierror_unadj <- sum(test_stat_unadj > cri_val) / nsim
+    typeierror_adj <- sum(test_stat_adj > cri_val) / nsim
+    typeierror_vec <- c(typeierror_unadj,typeierror_adj )
+    names(typeierror_vec) <- c("typeierror_unadj","typeierror_adj" )
+    print(typeierror_vec)
+  }
+
+  result_df <- cbind(SD[i, ],
+                     data.frame(typeierror_unadj = typeierror_unadj,
+                                typeierror_adj = typeierror_adj))             
+  
+  result_df_collected <- rbind(result_df_collected, result_df)
+  result_list_collected <- c(result_list_collected, list(list(
+    result_df = result_df,
+    test_stat_unadj = test_stat_unadj, 
+    test_stat_adj = test_stat_adj
+  )))
+}
+  saveRDS(result_df_collected, file = paste0("result_df_collected_nsim", nsim, "b.RDS"))
+  saveRDS(result_list_collected, file = paste0("result_list_collected_nsim", nsim, "b.RDS"))
+  write.csv(result_df_collected, file = paste0("result_df_collected_nsim", nsim, "b.csv"))
+
+```
+
+
+
+
+```{r}
+# 3. Make plots and tables ------------------------------------------------
+
+
+
+nsim <- 500
+
+result <-
+  readRDS(paste0("result_df_collected_nsim", nsim, ".RDS"))
+
+
+hist(result$power_unadj)
+hist(result$n)
+
+min_power <- min(c(result$power_adj, result$power_unadj))
+max_power <- max(c(result$power_adj, result$power_unadj))
+min_typeierror <-
+  min(c(result$typeierror_adj, result$typeierror_unadj))
+max_typeierror <-
+  max(c(result$typeierror_adj, result$typeierror_unadj))
+
+power_1 <-
+  result %>%
+  ggplot(aes(x = power_adj)) +
+  geom_histogram(aes(y = after_stat(count)), binwidth = 0.01, color = "white") +
+  geom_vline(
+    xintercept = 0.8,
+    linetype = 2,
+    color = "blue",
+    size = 1.2
+  ) +
+  # stat_function(fun = dnorm,
+  #               args = list(mean = mean(result$power_adj),
+  #                           sd = sd(result$power_adj)),
+  #               color = "orange",
+  #               size = 1.5) +
+  xlab("power adjusted") +
+  theme_bw() + myggfont()
+
+power_2 <-
+  result %>%
+  ggplot(aes(x = power_unadj)) +
+  geom_histogram(aes(y = after_stat(count)), binwidth = 0.01, color = "white") +
+  geom_vline(
+    xintercept = 0.8,
+    linetype = 2,
+    color = "blue",
+    size = 1.2
+  ) +
+  # stat_function(fun = dnorm,
+  #               args = list(mean = mean(result$power_adj),
+  #                           sd = sd(result$power_adj)),
+  #               color = "orange",
+  #               size = 1.5) +
+  xlab("power unadjusted") +
+  theme_bw() + myggfont()
+
+power_3 <-
+  result %>%
+  ggplot(aes(x = n, y = power_adj)) +
+  geom_point(alpha = 0.6, size = 0.8) +
+  geom_hline(
+    yintercept = 0.8,
+    linetype = 2,
+    color = "blue",
+    size = 1.2
+  ) +
+  # geom_smooth(method = "loess", size = 1.5, se = FALSE) +
+  xlab("output sample size") +
+  ylab("power adjusted") +
+  scale_x_continuous(breaks = c(20, 60, 100, 200, 300)) +
+  theme_bw() + myggfont()
+
+pdf("figure 0 - power.pdf", width = 10, height = 5)
+grid.arrange(power_1, power_2, power_3, ncol = 3)
+dev.off()
+
+    
+```
+
+```{r}
+# 3. Make plots for ppt-----------------------------------------------
+nsim <- 500
+
+result <-
+  readRDS(paste0("result_df_collected_nsim", nsim, ".RDS"))
+
+
+hist(result$power_unadj)
+hist(result$n)
+
+min_power <- min(c(result$power_adj, result$power_unadj))
+max_power <- max(c(result$power_adj, result$power_unadj))
+min_typeierror <-
+  min(c(result$typeierror_adj, result$typeierror_unadj))
+max_typeierror <-
+  max(c(result$typeierror_adj, result$typeierror_unadj))
+
+power_1 <-
+  result %>%
+  ggplot(aes(x = power_adj)) +
+  geom_histogram(aes(y = after_stat(count)), binwidth = 0.01, color = "white") +
+  geom_vline(
+    xintercept = 0.8,
+    linetype = 2,
+    color = "blue",
+    size = 1.2
+  ) +
+  # stat_function(fun = dnorm,
+  #               args = list(mean = mean(result$power_adj),
+  #                           sd = sd(result$power_adj)),
+  #               color = "orange",
+  #               size = 1.5) +
+  xlab("power adjusted") +
+  theme_bw() + myggfont()
+
+power_2 <-
+  result %>%
+  ggplot(aes(x = power_unadj)) +
+  geom_histogram(aes(y = after_stat(count)), binwidth = 0.01, color = "white") +
+  geom_vline(
+    xintercept = 0.8,
+    linetype = 2,
+    color = "blue",
+    size = 1.2
+  ) +
+  # stat_function(fun = dnorm,
+  #               args = list(mean = mean(result$power_adj),
+  #                           sd = sd(result$power_adj)),
+  #               color = "orange",
+  #               size = 1.5) +
+  xlab("power unadjusted") +
+  theme_bw() + myggfont()
+
+power_3 <-
+  result %>%
+  ggplot(aes(x = n, y = power_adj)) +
+  geom_point(alpha = 0.6, size = 0.8) +
+  geom_hline(
+    yintercept = 0.8,
+    linetype = 2,
+    color = "blue",
+    size = 1.2
+  ) +
+  # geom_smooth(method = "loess", size = 1.5, se = FALSE) +
+  xlab("output sample size") +
+  ylab("power adjusted") +
+  scale_x_continuous(breaks = c(20, 60, 100, 200, 300)) +
+  theme_bw() + myggfont()
+
+pdf("figure 0 - power.pdf", width = 10, height = 5)
+grid.arrange(power_1, power_2, ncol = 2)
+dev.off()
+```
+
+
+```{r}
+result <-
+  readRDS(paste0("result_df_collected_nsim", nsim, "b.RDS"))
+
+typeierror_1 <-
+    result %>%
+    ggplot(aes(x = typeierror_adj)) +
+    geom_histogram(aes(y = ..density..), binwidth = 0.006, color = "white") +
+    geom_vline(
+    xintercept = 0.05,
+    linetype = 2,
+    color = "blue",
+    size = 1.2) +
+    # stat_function(fun = dnorm,
+    #               args = list(mean = mean(result$typeierror_adj),
+    #                           sd = sd(result$typeierror_adj)),
+    #               color = "orange",
+    #               size = 1.5) +
+    xlab("type I error adjusted") + 
+    theme_bw() + myggfont()
+
+typeierror_2 <-
+    result %>%
+    ggplot(aes(x = typeierror_unadj)) +
+    geom_histogram(aes(y = ..density..), binwidth = 0.006, color = "white") +
+    geom_vline(
+    xintercept = 0.05,
+    linetype = 2,
+    color = "blue",
+    size = 1.2)+
+    # stat_function(fun = dnorm,
+    #               args = list(mean = mean(result$typeierror_adj),
+    #                           sd = sd(result$typeierror_adj)),
+    #               color = "orange",
+    #               size = 1.5) +
+    xlab("type I error unadjusted") + 
+    theme_bw() + myggfont()
+
+typeierror_3 <- 
+    result %>%
+    ggplot(aes(x = n, y = typeierror_adj)) +
+    geom_point(alpha = 0.6, size = 0.8) +
+    # geom_smooth(method = "loess", size = 1.5) +
+    xlab("output sample size") +
+    ylab("type I error adjusted") +
+    scale_x_continuous(breaks = c(20, 60, 100, 200, 300)) +
+    theme_bw() + myggfont()
+
+pdf("figure 0 - typeirror.pdf", width = 10, height = 5)
+#grid.arrange(typeierror_1, typeierror_2, typeierror_3, ncol = 3)
+grid.arrange(typeierror_1, typeierror_2,  ncol = 2)
+dev.off()
+
+```
+
