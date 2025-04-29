@@ -1,6 +1,6 @@
 # paper_Causal_excursion_mult_trt
 
-Reproducible code for paper "Causal excursion effect for continuous outcome with multilevel treatment" by Jeremy Lin and Tianchen Qian
+Reproducible code for paper "Causal excursion effect for continuous outcome with multilevel treatment" by Jeremy Lin and Tianchen Qian. For an example of using the wcls estimator for continuous treatment, run toy-example.R in the "misc" folder.
 
 ## File structure
 
