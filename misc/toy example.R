@@ -98,3 +98,39 @@ fit  <- wcls_categorical_treatment(
 )
 
 fit
+
+# case where pmatrix_tilde different for some time point 
+# in this scenario we assume probability of no treatment is greater for the first 2 decision point (DP)
+probs_list <- list(
+  c(0.60, 0.20, 0.20),  # DP 1
+  c(0.40, 0.3, 0.3),   # DP 2
+  c(0.33, 0.33, 0.33)
+)
+
+pmatrix_tilde <- matrix(rep(NA, sample_size * total_T * 3), ncol = 3)
+
+for (t in 1: total_T) {
+  row_index <- seq(from = t, by = total_T, length = sample_size)
+  
+  if (t <=3) {
+    pmatrix_tilde[row_index, ] <- matrix(rep(probs_list[[t]], each = sample_size), nrow = sample_size)
+  }else {
+    pmatrix_tilde[row_index, ] <- matrix(rep(probs_list[[3]], each = sample_size), nrow = sample_size)
+  }
+}
+pmatrix_tilde
+
+fit  <- wcls_categorical_treatment(
+  dta = dta,
+  id_varname = "userid",
+  decision_time_varname = "time",
+  treatment_varname = "A",
+  outcome_varname = "Y",
+  control_varname = c("S", "time"),
+  moderator_varname = c("S"),
+  rand_prob_varname = "prob_A",
+  estimator_initial_value = NULL,
+  trt_level = 2,
+  pmatrix_tilde = pmatrix_tilde,
+  avail_varname = avail_varname
+)

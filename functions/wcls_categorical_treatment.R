@@ -1,16 +1,9 @@
-# run ".../misc/toy_example" for an example how to to use wcls estimator.
-# 04/04 :debuged and updated generalized for input in tibble and fix decission time variable
-# 04/07 : Added dependedies for multi root packages 
-
-if(!require(rootSolve)){
-  install.packages("rootSolve")
-  library(rootSolve)
-}
-
+library(rootSolve)
+# update 11/14/2025 pmatrix_tilde dimension is updated to (sample_size * total_T * nA) x nA to acommodate ptilde for each individual 
 
 #------------------ wcls categorical treatment ---------------------------------
 # TQ estimator can be found in R_Code/ estimator_MEE.R
-#' Estimates the marginal excursion effect for continuous outcome MRT 
+#' Estimates the marginal excursion effect for cntinuous outcome MRT 
 #' with categorical treatment
 #'
 #' This estimator returns the estimates for the marginal excursion effect estimator
@@ -30,13 +23,13 @@ if(!require(rootSolve)){
 #' @param avail_varname the variable name that specifies the availability of the subjects,
 #'                      default to be always available at any decision points using NULL
 #' @param trt_level variable that specifies the number of categorical treatment 
-#' @param pmatrix_tilde a matrix that pre-specifies the probability at each decision point
+#' @param pmatrix_tilde a matrix that pre-specifies the probability at each decision point for each individual
 #'                      default to be always equal for each treatments using NULL
 #' @param estimator_initial_value a numeric vector of the initial value for the estimator,
 #'                                its length should be the sum of the length of control and moderator variables plus 2
 #'                                default to be all 0's using NULL
 #'
-#' @return Returns the estimated beta with its intercept and alpha with its intercept,
+#' @returnReturns the estimated beta with its intercept and alpha with its intercept,
 #'         the standard error of the estimated beta with its intercept and alpha with its intercept,
 #'         the adjusted standard error of the estimated beta with its intercept and alpha with its intercept for small sample,
 #'         the estimated variance-covariance matrix for the estimated beta with its intercept and alpha with its intercept,
@@ -44,7 +37,6 @@ if(!require(rootSolve)){
 #'         the 95 percent confidence interval for beta_hat, and the adjusted 95 percent confidence interval for beta_hat,
 #'         the dimension of the moderated variables, and the dimension of the control variables,
 #'         the value of the probability weight at each decision point
-#' @import rootSolve
 #' @export 
 #'
 #' @exampleswcls_categorical_treatment(dta = dta,
@@ -75,19 +67,17 @@ wcls_categorical_treatment <- function(
 )
 {
   ### 1. preparation ###
-  # convert to dataframe 
-  dta <- as.data.frame(dta)
   
   sample_size <- length(unique(dta[, id_varname]))
-  total_person_decisionpoint <-  nrow(dta)
-  total_T <- max(dta[, decision_time_varname])
+  total_person_decisionpoint <- nrow(dta)
+  total_T <- total_person_decisionpoint / sample_size
   A <- dta[, treatment_varname]
   
   p_t <- dta[, rand_prob_varname]
   nA <- trt_level + 1
   # assign pmatrix_tilde equal for each treatment if pmatrix_tilde is not specified
   if (is.null(pmatrix_tilde)) {
-    pmatrix_tilde <- matrix(rep(1/nA, nA* total_T), ncol = nA)
+    pmatrix_tilde <- matrix(rep(1/nA, nA* total_T * sample_size), ncol = nA)
   } 
   
   # indicator matrix, each column i represent  I(At = i) 
@@ -100,13 +90,16 @@ wcls_categorical_treatment <- function(
   p_t_tilde = rep(NA, nrow(dta))
   
   for (i in 1:total_T) {
+    # extract row index for all individual at time i 
+    row_index <- which(dta$time == i)
     # extract p_t for at time point i
-    temp <- dta[which(dta[,decision_time_varname] == i), treatment_varname]
-    p_t_tilde[which(dta[,decision_time_varname] == i)] = match_p_tilde(temp, pmatrix_tilde[i,])
+    temp <- dta[row_index, treatment_varname]
+    p_t_tilde[row_index] = match_p_tilde(temp, pmatrix_tilde[row_index,])
     ind <- build_W_mat(temp,pmatrix_tilde[i,] )
-    ind_matrix[which(dta[,decision_time_varname] == i),] = ind$ind_matrix
-    ind_center[which(dta[,decision_time_varname] == i),] = ind$ind_center
+    ind_matrix[which(dta$time == i),] = ind$ind_matrix
+    ind_center[which(dta$time == i),] = ind$ind_center
   }
+  
   
   Y <- dta[, outcome_varname]
   
@@ -309,17 +302,6 @@ wcls_categorical_treatment <- function(
 
 # utility function to run 
 
-#' Extract coefficient from wcls estimator
-#' Returns the coefficient of beta and alpha from the multiroot function
-#'
-#' @param root solution obtained from multiroot 
-#' @param p dimension of beta hat; dim = (nA-1) x (moderator + 1)
-#' @param q dimension of alpha hat; dim = control + 1
-#'
-#' @return object that stores both alpha and beta roots
-#' @export
-#'
-#' @examples get_alpha_beta_from_multiroot_result(solution, p, q)
 get_alpha_beta_from_multiroot_result <- function(root, p, q)
 {
   if (p == 1) {
@@ -335,22 +317,8 @@ get_alpha_beta_from_multiroot_result <- function(root, p, q)
   return(list(alpha = alpha_root, beta = beta_root))
 }
 
-#' This is a function to create binary dummy matrix 
-#' Interaction between treatment and moderator variable.
-#'
-#' @param ind_matrix a n*T by trt level (excluding control) binary matrix  
-#'                   where 1 equal assigned treatment at column(trt level)
-#' @param ind_names column names for ind matrix
-#' @param cov matrix of moderator variable
-#' @param cov_names name of the moderator
-#'
-#' @return matrix Wdm which have columns equal to p + p*trt_level 
-#'        column is moderator and interaction between treatment and moderator
-#' @export
-#'
-#' @examples interact(ind_center, ind_names, St, St_names)
 interact <- function(ind_matrix, ind_names, cov, cov_names){
-  
+  # This is a function to create dummy matrix of treatment and 
   ncol_interaction <- ncol(cov) * ncol(ind_matrix)
   df_names <- rep(NA, ncol_interaction)
   Interaction_matrix <- 
@@ -369,17 +337,9 @@ interact <- function(ind_matrix, ind_names, cov, cov_names){
   return(Interaction_matrix)
 }
 
-#' Find the locations at which the value changes from the previous one
-#' Used when total observation per individual is different (unbalanced data)
-#' @param v is observation for individual i 
-#'
-#' @return
-#' @export
-#'
-#' @examples find_change_location(5)
 find_change_location <- function(v){
-  #' 
-  #, copied from TQ github
+  #' Find the locations at which the value changes from the previous one
+  # Used when total observation per individual is different, copied from TQ github
   
   n <- length(v)
   if (n <= 1) {
@@ -388,21 +348,18 @@ find_change_location <- function(v){
   return(c(1, 1 + which(v[1:(n-1)] != v[2:n])))
 }
 
-#' This function match treatment assignment with p_tilde at a given time point
-#'
-#' @param u trt assignment for all individual at a given time point
-#' @param p_tilde p_tilde is the assignment at given time point 
-#'
-#' @return
-#' @export
-#'
-#' @examples
-match_p_tilde <- function(u, p_tilde){
+match_p_tilde <- function(u, pt_tilde){
+  # this function match treatment assignment with p_tilde at a given time point
+  # u is trt assignment for all individual at a given time point
+  # p_tilde is the assignment at given time point 
   temp_p_tilde = rep(NA, length(u))
   for (row in 1:length(u)) {
     # assign p_tilde for each individual
+    # grab p_tilde for each individual(row)
+    p_tilde <- pt_tilde[row, ]
     for (j in 1:length(p_tilde)) {
-      if (u[row] == (j-1)) {
+      # match with corresponding p_tilde
+       if (u[row] == (j-1)) {
         temp_p_tilde[row] = p_tilde[j]
       }
     }
@@ -410,19 +367,10 @@ match_p_tilde <- function(u, p_tilde){
   return(temp_p_tilde)
 }
 
-
-#' Create a dummy matrix for indicator function and centered Indicator matrix
-#' this function is needed to create indicator matrix for building Wdm 
-#'
-#' @param u  vector of trt assignment for all individual at a given time point i
-#' @param p_tilde is the weight ptilde at given time point i
-#'
-#' @return binary matrix with n_indiv row and trt_level (exclude control) column. 
-#'         value 1 in (i, j) represent individual i get treatment j
-#' @export
-#'
-#' @examples
 build_W_mat <- function(u, p_tilde){
+  # this function match treatment assignment with p_tilde at a given time point
+  # u is trt assignment for all individual at a given time point
+  # p_tilde is the assignment at given time point 
   n_ind = length(u)
   n_trt = length(p_tilde) - 1
   temp_ind_center <- temp_ind_matrix <- matrix(rep(NA, n_ind*n_trt), ncol = n_trt)
